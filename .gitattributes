@@ -1,4 +1,4 @@
-﻿# Unity Large File Storage (LFS)
+# Unity Large File Storage
 *.fbx filter=lfs diff=lfs merge=lfs -text
 *.obj filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
