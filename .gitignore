@@ -1,0 +1,68 @@
+# ==========================================
+# 1. OS & Common Temporary Files
+# ==========================================
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ==========================================
+# 2. Android Studio & Gradle
+# ==========================================
+*.iml
+.gradle/
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.idea/
+.externalNativeBuild/
+.cxx/
+
+# Android Build Outputs
+**/build/
+android/app/build/
+android/unityLibrary/build/
+*.apk
+*.aab
+
+# ==========================================
+# 3. Unity Engine (가장 중요)
+# ==========================================
+# 라이브러리 캐시 폴더는 수 GB에 달하므로 절대 커밋 금지
+unity/[Ll]ibrary/
+unity/[Tt]emp/
+unity/[Oo]bj/
+unity/[Bb]uild/
+unity/[Bb]uilds/
+unity/[Ll]ogs/
+unity/[Uu]ser[Ss]ettings/
+unity/[Mm]emoryCaptures/
+unity/[Aa]ssets/AssetStoreTools*
+
+# Visual Studio / Rider IDE 솔루션 및 프로젝트 캐시
+unity/*.csproj
+unity/*.unityproj
+unity/*.sln
+unity/*.suo
+unity/*.user
+unity/*.userprefs
+unity/*.pidb
+unity/*.booproj
+unity/*.svd
+unity/*.pdb
+unity/*.opendb
+unity/*.VC.db
+
+# Unity Crash Reports
+unity/sysinfo.txt
+
+# ==========================================
+# 4. Unity as a Library (UaaL) 주의 항목
+# ==========================================
+# Unity에서 Android로 Export 시 생성되는 임시 심볼/아티팩트 제외
+android/unityLibrary/symbols/
+android/unityLibrary/src/main/assets/bin/Data/Managed/
