@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CollisionEvent",
+  "description": "Unity AR에서 Android Native로 전송하는 물리 간섭/충돌 상태 피드백 IPC 규격",
+  "type": "object",
+  "properties": {
+    "isColliding": {
+      "type": "boolean",
+      "description": "충돌 간섭 발생 여부 (true: 침범/위험, false: 안전)"
+    },
+    "target": {
+      "type": "string",
+      "enum": ["WALL", "FURNITURE", "NONE"],
+      "description": "충돌 대상 (WALL: 벽면 평면, FURNITURE: 기배치 타 가구, NONE: 안전)"
+    },
+    "message": {
+      "type": "string",
+      "description": "네이티브 상단 배너 표시용 직관적 알림 문구"
+    }
+  },
+  "required": ["isColliding", "target", "message"],
+  "additionalProperties": false,
+  "example": {
+    "isColliding": true,
+    "target": "WALL",
+    "message": "벽면 침범 발생"
+  }
+}

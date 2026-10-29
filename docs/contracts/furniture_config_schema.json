@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FurnitureConfig",
+  "description": "Android Native에서 Unity AR로 전송하는 가구 치수 IPC 데이터 규격 (단위: 미터)",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "가구 명칭 (예: 원목 단독 책상)"
+    },
+    "width": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 3.0,
+      "description": "가구 가로 폭 (단위: meter, 120cm -> 1.20)"
+    },
+    "depth": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 3.0,
+      "description": "가구 세로 깊이 (단위: meter, 60cm -> 0.60)"
+    },
+    "height": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 3.0,
+      "description": "가구 높이 (단위: meter, 75cm -> 0.75)"
+    },
+    "unit": {
+      "type": "string",
+      "enum": ["meter"],
+      "default": "meter",
+      "description": "단위 오인 방지용 가드 필드 (항상 'meter' 고정)"
+    }
+  },
+  "required": ["name", "width", "depth", "height", "unit"],
+  "additionalProperties": false,
+  "example": {
+    "name": "원목 단독 책상",
+    "width": 1.20,
+    "depth": 0.60,
+    "height": 0.75,
+    "unit": "meter"
+  }
+}

@@ -16,7 +16,7 @@
 | **수행 기간** | 2026-09-01 \~ 2026-12-15 (2학기) |
 | **소속 / 과정** | 한성대학교 컴퓨터공학부 · 2026학년도 2학기 고급모바일프로그래밍 [B분반] |
 | **프로젝트 유형** | 모바일 AR 하이브리드 유틸리티 (Android Native + Unity as a Library) |
-| **문서 버전** | v1.1 (2026-10-29 WBS 로드맵 반영) |
+| **문서 버전** | v1.2 (2026-10-29 IPC 계약 및 머지 규칙 보강) |
 
 ---
 
@@ -80,8 +80,9 @@
 | **소프트웨어** | UaaL 하이브리드 안드로이드 앱 | `android/`, `unity/` | 안드로이드 네이티브 + Unity 라이브러리 |
 | **개발 로드맵** | **팀 WBS 및 단계별 개발 로드맵** | [`docs/고모프_프로젝트_개발로드맵.md`](docs/고모프_프로젝트_개발로드맵.md) | **역할 분담, 주차별 체크리스트, 통신 규격** |
 | **설계 문서** | 소프트웨어 요구명세서 (SRS) | `docs/requirements.md` (로컬: `요구사항 분석.md`) | 요구사항 12종 및 IPO 명세 |
+| **통신 규격** | **가구 치수 JSON 스키마** | [`docs/contracts/furniture_config_schema.json`](docs/contracts/furniture_config_schema.json) | Android $\rightarrow$ Unity 통신 규격 원본 |
+| **통신 규격** | **충돌 알림 JSON 스키마** | [`docs/contracts/collision_event_schema.json`](docs/contracts/collision_event_schema.json) | Unity $\rightarrow$ Android 피드백 규격 원본 |
 | **다이어그램** | Level 0 / 1 데이터 흐름도 (DFD) | `docs/DFD_데이터흐름도.png`, `.drawio` | 데이터 흐름 및 프로세스 |
-| **통신 규격** | Android-Unity IPC JSON 스키마 | `docs/contracts/` | 양방향 메시지 규격 정의 |
 | **형상 관리** | 통합 형상 관리 및 LFS 설정 | `.gitignore`, `.gitattributes` | 모노레포 버전 관리 |
 
 ---
@@ -119,7 +120,7 @@
 
 ---
 
-### 8. 아키텍처 및 핵심 설계 원칙
+### 8. 아키텍처 및 IPC 데이터 계약 (Data Contract)
 
 ```text
 AMP_FinalTerm_Project/
@@ -132,12 +133,30 @@ AMP_FinalTerm_Project/
 │   └── ProjectSettings/               # 엔진 빌드 및 그래픽 세팅
 └── docs/                              # 공식 산출물 및 인터페이스 규격
     ├── 고모프_프로젝트_개발로드맵.md     # 팀 WBS 및 단계별 개발 로드맵 (상세)
-    ├── contracts/                     # Android-Unity IPC JSON 메시지 스키마
+    ├── contracts/                     # Android-Unity IPC JSON 스키마 명세
+    │   ├── furniture_config_schema.json
+    │   └── collision_event_schema.json
     └── DFD_데이터흐름도.png              # 데이터 흐름도
 ```
 
-#### 사전 합의 IPC 데이터 통신 규격 (JSON)
-* **Android $\rightarrow$ Unity (`UnitySendMessage`):**
+#### 8.1 [사전 합의] Android-Unity IPC 데이터 규격
+
+> [!WARNING]
+> 안드로이드 네이티브(UI)는 사용자에게 **센티미터(cm)** 단위로 입력받지만, **유니티 엔진의 기본 월드 좌표계는 1단위 = 1미터(m)**입니다.
+> 따라서 안드로이드에서 유니티로 전송 시 **반드시 100을 나누어 미터 단위($120\text{cm} \rightarrow 1.20$)**로 변환해야 하며, 이를 어길 시 $100$배 거대한 가구가 생성되는 런타임 오류가 발생합니다.
+
+* **[규격 1] 가구 치수 전송 규격 (Android $\rightarrow$ Unity `UnitySendMessage`):**
+  - **호출:** `UnityPlayer.UnitySendMessage("ARBridgeManager", "OnReceiveFurnitureData", jsonString)`
+  - **상세 스키마:** [`docs/contracts/furniture_config_schema.json`](docs/contracts/furniture_config_schema.json)
+  
+  | 필드명 | 타입 | 필수 여부 | 단위 / 포맷 | 허용 범위 | 세부 설명 |
+  | :--- | :--- | :---: | :--- | :--- | :--- |
+  | `name` | string | 필수 | 텍스트 | 1 \~ 30자 | 가구 명칭 (예: "원목 책상") |
+  | `width` | float | 필수 | **미터(m)** | 0.10 \~ 3.00 | 가구 가로 폭 ($120\text{cm} \rightarrow 1.20$) |
+  | `depth` | float | 필수 | **미터(m)** | 0.10 \~ 3.00 | 가구 세로 깊이 ($60\text{cm} \rightarrow 0.60$) |
+  | `height` | float | 필수 | **미터(m)** | 0.10 \~ 3.00 | 가구 높이 ($75\text{cm} \rightarrow 0.75$) |
+  | `unit` | string | 필수 | `"meter"` 고정 | 고정 문자열 | 단위 오류 방지용 검증 필드 |
+
   ```json
   {
     "name": "원목 단독 책상",
@@ -147,9 +166,17 @@ AMP_FinalTerm_Project/
     "unit": "meter"
   }
   ```
-  *(주의: Android 입력값 cm를 100으로 나눈 미터 단위로 전달)*
 
-* **Unity $\rightarrow$ Android (JNI Callback):**
+* **[규격 2] 충돌 피드백 알림 규격 (Unity $\rightarrow$ Android JNI Callback):**
+  - **호출:** JNI 콜백 `OnCollisionStateChanged(boolean isColliding)`
+  - **상세 스키마:** [`docs/contracts/collision_event_schema.json`](docs/contracts/collision_event_schema.json)
+
+  | 필드명 | 타입 | 필수 여부 | 허용 값 | 세부 설명 |
+  | :--- | :--- | :---: | :--- | :--- |
+  | `isColliding` | boolean | 필수 | `true` / `false` | 충돌/간섭 발생 여부 |
+  | `target` | string | 필수 | `"WALL"`, `"FURNITURE"`, `"NONE"` | 충돌 장애물 유형 |
+  | `message` | string | 필수 | 텍스트 | 네이티브 상단 배너 표시용 문구 |
+
   ```json
   {
     "isColliding": true,
@@ -157,6 +184,17 @@ AMP_FinalTerm_Project/
     "message": "벽면 침범 발생"
   }
   ```
+
+---
+
+#### 8.2 팀 머지 및 코드 리뷰 필수 준수 규칙 (Merge Policy)
+
+모든 팀원은 `develop` 브랜치에 코드를 반영(PR 머지)하기 전 아래 체크리스트를 반드시 확인해야 합니다:
+
+- [ ] **[단위 검증]** 안드로이드에서 전달하는 모든 치수 수치가 **미터(m)** 단위로 환산되었는가? (`cm / 100.0f`)
+- [ ] **[필드 일치]** JSON 키 값(`name`, `width`, `depth`, `height`, `unit`)이 사전 합의된 스키마와 대소문자까지 일치하는가?
+- [ ] **[독립성 유지]** 다른 파트의 코드 영역을 임의로 수정하지 않고, 약속된 브릿지 인터페이스 함수만 호출했는가?
+- [ ] **[사전 협의]** 만약 새로운 JSON 필드가 필요할 경우, 상대 파트 담당자(최주환/진승호/김기현)와 사전 구두 협의를 완료했는가?
 
 ---
 
