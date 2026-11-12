@@ -132,14 +132,23 @@ namespace RoomFitAR.AR
             if (enableEditorFallbackFloor && arCamera != null)
             {
                 Ray ray = arCamera.ScreenPointToRay(screenPoint);
-                Plane virtualFloor = new Plane(Vector3.up, Vector3.zero);
-                if (virtualFloor.Raycast(ray, out float enterDistance) && enterDistance <= 20.0f)
+                float floorY = arCamera.transform.position.y > 0.2f ? 0.0f : arCamera.transform.position.y - 0.8f;
+                Plane virtualFloor = new Plane(Vector3.up, new Vector3(0f, floorY, 0f));
+
+                if (virtualFloor.Raycast(ray, out float enterDistance) && enterDistance > 0.1f && enterDistance <= 20.0f)
                 {
                     Vector3 hitPoint = ray.GetPoint(enterDistance);
                     Vector3 forward = CalculateCameraHorizontalForward();
                     hitPose = new Pose(hitPoint, Quaternion.LookRotation(forward, Vector3.up));
                     return true;
                 }
+
+                // 에디터에서 카메라가 수평(X=0도)을 바라보고 있어 바닥과 광선이 평행할 때 전방 2.2m 바닥을 기본 조준
+                Vector3 camForward = CalculateCameraHorizontalForward();
+                Vector3 defaultFloorPoint = arCamera.transform.position + camForward * 2.2f;
+                defaultFloorPoint.y = floorY;
+                hitPose = new Pose(defaultFloorPoint, Quaternion.LookRotation(camForward, Vector3.up));
+                return true;
             }
 #endif
 

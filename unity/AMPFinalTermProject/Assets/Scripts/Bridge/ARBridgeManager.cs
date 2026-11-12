@@ -238,13 +238,13 @@ namespace RoomFitAR.Bridge
         [ContextMenu("Test: Report Wall Collision (True)")]
         public void TestReportWallCollision()
         {
-            ReportCollisionState(true, CollisionEventData.TargetWall, "벽면 침범 발생");
+            SendCollisionEventToAndroid(CollisionEventData.CreateWallCollision("벽면 침범 발생"));
         }
 
         [ContextMenu("Test: Report Collision Cleared (False)")]
         public void TestReportCollisionCleared()
         {
-            ReportCollisionState(false, CollisionEventData.TargetNone, "배치 가능 영역");
+            SendCollisionEventToAndroid(CollisionEventData.CreateSafe());
         }
 
         private static bool ParseBooleanString(string rawValue, bool defaultValue)

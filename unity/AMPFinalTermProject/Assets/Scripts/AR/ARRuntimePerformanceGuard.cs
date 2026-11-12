@@ -29,6 +29,10 @@ namespace RoomFitAR.AR
         [Tooltip("메모리 점검 주기 (단위: 초)")]
         private float checkIntervalSeconds = 5.0f;
 
+        [SerializeField]
+        [Tooltip("PC 에디터 환경에서는 에디터 자체 메모리(약 400MB+)가 포함되므로 모바일 기기에서만 자동 정리를 수행할지 여부")]
+        private bool enforceMemoryGuardInEditor = false;
+
         public float CurrentSmoothedFps { get; private set; } = 60.0f;
         public float AllocatedMemoryMB { get; private set; }
         public bool IsMeetingFpsTarget => CurrentSmoothedFps >= minAcceptableFps;
@@ -91,6 +95,11 @@ namespace RoomFitAR.AR
         {
             long allocatedBytes = Profiler.GetTotalAllocatedMemoryLong();
             AllocatedMemoryMB = allocatedBytes / (1024f * 1024f);
+
+            if (Application.isEditor && !enforceMemoryGuardInEditor)
+            {
+                return;
+            }
 
             if (AllocatedMemoryMB >= memoryCleanupThresholdMB)
             {

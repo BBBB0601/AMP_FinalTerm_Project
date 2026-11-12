@@ -507,8 +507,9 @@ namespace RoomFitAR.AR
 
         /// <summary>
         /// [SFR-004 / QUR-001] 가구 오브젝트를 ARAnchor에 바인딩하여 카메라 이동 시 월드 좌표 드리프트를 방지한다.
+        /// 에디터 등 ARAnchor 서브시스템이 구동되지 않는 환경에서는 불필요한 에러 방지를 위해 스킵한다.
         /// </summary>
-        private void BindToARAnchor(ARPlane plane)
+        private async void BindToARAnchor(ARPlane plane)
         {
             if (PlacedFurnitureInstance == null)
             {
@@ -517,11 +518,18 @@ namespace RoomFitAR.AR
 
             DetachFromAnchorPreservingWorldTransform();
 
+            // 에디터 Play 모드 등 실제 ARAnchor 서브시스템이 실행 중이지 않을 때는 월드 위치만 유지하고 종료
+            if (anchorManager == null || !anchorManager.enabled ||
+                anchorManager.subsystem == null || !anchorManager.subsystem.running)
+            {
+                return;
+            }
+
             Pose currentPose = new Pose(
                 PlacedFurnitureInstance.transform.position,
                 PlacedFurnitureInstance.transform.rotation);
 
-            if (anchorManager != null && anchorManager.enabled && plane != null && plane.subsumedBy == null)
+            if (plane != null && plane.subsumedBy == null)
             {
                 try
                 {
@@ -533,18 +541,18 @@ namespace RoomFitAR.AR
                 }
             }
 
-            if (CurrentBoundAnchor != null)
+            if (CurrentBoundAnchor == null)
+            {
+                var result = await anchorManager.TryAddAnchorAsync(currentPose);
+                if (result.status.IsSuccess())
+                {
+                    CurrentBoundAnchor = result.value;
+                }
+            }
+
+            if (CurrentBoundAnchor != null && PlacedFurnitureInstance != null)
             {
                 PlacedFurnitureInstance.transform.SetParent(CurrentBoundAnchor.transform, true);
-            }
-            else if (anchorManager != null && anchorManager.enabled)
-            {
-                ARAnchor directAnchor = PlacedFurnitureInstance.GetComponent<ARAnchor>();
-                if (directAnchor == null)
-                {
-                    directAnchor = PlacedFurnitureInstance.AddComponent<ARAnchor>();
-                }
-                CurrentBoundAnchor = directAnchor;
             }
         }
 
