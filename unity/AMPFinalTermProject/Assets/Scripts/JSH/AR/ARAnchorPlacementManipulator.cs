@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.EnhancedTouch;
 using UnityEngine.XR.ARFoundation;
@@ -31,7 +33,14 @@ namespace RoomFitAR.AR
         [Tooltip("Android-Unity IPC 브릿지 매니저 (비워두면 씬에서 자동 탐색)")]
         private ARBridgeManager bridgeManager;
 
+        [SerializeField]
+        [Tooltip("바닥 높이 확정 상태를 조회할 ARPlaneDetectionController (비워두면 자동 탐색)")]
+        private ARPlaneDetectionController planeDetectionController;
+
         [Header("Placement & Gesture Settings")]
+        [SerializeField]
+        [Tooltip("배치 전 바닥 높이 확정(1회 캘리브레이션)을 필수 요구할지 여부")]
+        private bool requireFloorCalibrationBeforePlacement = true;
         [SerializeField]
         [Tooltip("Android에서 가구 치수 JSON 수신 시 현재 조준 위치에 즉시 자동 배치할지 여부")]
         private bool autoPlaceOnDataReceived = true;
@@ -72,8 +81,10 @@ namespace RoomFitAR.AR
         private Vector3 targetDragPosition;
         private bool isDraggingSingleFinger;
         private bool isTwistingTwoFingers;
+        private bool isTouchBlockedByUI;
         private Vector2 initialTouchScreenPos;
         private Vector2 previousTwistVector;
+        private readonly List<RaycastResult> uiRaycastResults = new();
 
         private void Awake()
         {
@@ -91,6 +102,11 @@ namespace RoomFitAR.AR
             {
                 bridgeManager = FindFirstObjectByType<ARBridgeManager>();
             }
+
+            if (planeDetectionController == null)
+            {
+                planeDetectionController = FindFirstObjectByType<ARPlaneDetectionController>();
+            }
         }
 
         private void OnEnable()
@@ -103,6 +119,12 @@ namespace RoomFitAR.AR
                 bridgeManager.PlacementLockToggled += SetPlacementLocked;
                 bridgeManager.ResetPlacementRequested += ResetPlacedFurniture;
             }
+
+            if (planeDetectionController != null)
+            {
+                planeDetectionController.CalibratedFloorYChanged += OnCalibratedFloorYChanged;
+                planeDetectionController.FloorCalibrationCleared += OnFloorCalibrationCleared;
+            }
         }
 
         private void OnDisable()
@@ -112,6 +134,12 @@ namespace RoomFitAR.AR
                 bridgeManager.FurnitureDataReceived -= OnFurnitureDataReceived;
                 bridgeManager.PlacementLockToggled -= SetPlacementLocked;
                 bridgeManager.ResetPlacementRequested -= ResetPlacedFurniture;
+            }
+
+            if (planeDetectionController != null)
+            {
+                planeDetectionController.CalibratedFloorYChanged -= OnCalibratedFloorYChanged;
+                planeDetectionController.FloorCalibrationCleared -= OnFloorCalibrationCleared;
             }
 
             EnhancedTouchSupport.Disable();
@@ -305,9 +333,22 @@ namespace RoomFitAR.AR
                 switch (touch.phase)
                 {
                     case TouchPhase.Began:
+                        isTouchBlockedByUI = IsScreenPointOverUI(touch.screenPosition);
+                        if (isTouchBlockedByUI)
+                        {
+                            break;
+                        }
+
                         initialTouchScreenPos = touch.screenPosition;
                         if (!HasPlacedFurniture)
                         {
+                            if (requireFloorCalibrationBeforePlacement &&
+                                planeDetectionController != null &&
+                                !planeDetectionController.IsFloorCalibrated)
+                            {
+                                break;
+                            }
+
                             if (placementReticle != null && placementReticle.HasValidHit)
                             {
                                 SpawnAndAnchorFurniture(placementReticle.CurrentHitPose, placementReticle.CurrentHitPlane);
@@ -317,7 +358,7 @@ namespace RoomFitAR.AR
 
                     case TouchPhase.Moved:
                     case TouchPhase.Stationary:
-                        if (!HasPlacedFurniture || placementReticle == null)
+                        if (isTouchBlockedByUI || !HasPlacedFurniture || placementReticle == null)
                         {
                             break;
                         }
@@ -346,6 +387,7 @@ namespace RoomFitAR.AR
 
                     case TouchPhase.Ended:
                     case TouchPhase.Canceled:
+                        isTouchBlockedByUI = false;
                         if (isDraggingSingleFinger)
                         {
                             FinishSingleFingerDrag();
@@ -497,12 +539,172 @@ namespace RoomFitAR.AR
                 if (shader != null)
                 {
                     Material previewMaterial = new Material(shader);
-                    previewMaterial.color = new Color(0.0f, 0.85f, 0.75f, 0.45f);
+                    previewMaterial.color = new Color(0.0f, 0.85f, 0.75f, 0.16f);
                     boxRenderer.sharedMaterial = previewMaterial;
                 }
             }
 
+            CreateBoxWireframe(root.transform, size);
+            CreateFloorClearanceGuide(root.transform, size, 0.60f);
+            CreateFloorContactShadow(root.transform, size);
+
             return root;
+        }
+
+        private void OnCalibratedFloorYChanged(float newFloorY)
+        {
+            if (PlacedFurnitureInstance == null)
+            {
+                return;
+            }
+
+            DetachFromAnchorPreservingWorldTransform();
+            Vector3 pos = PlacedFurnitureInstance.transform.position;
+            pos.y = newFloorY;
+            PlacedFurnitureInstance.transform.position = pos;
+            targetDragPosition = pos;
+            BindToARAnchor(lastHitFloorPlane ?? planeDetectionController?.LowestFloorPlane);
+
+            FurniturePoseChanged?.Invoke(new Pose(
+                PlacedFurnitureInstance.transform.position,
+                PlacedFurnitureInstance.transform.rotation));
+        }
+
+        private void OnFloorCalibrationCleared()
+        {
+            ResetPlacedFurniture();
+        }
+
+        private bool IsScreenPointOverUI(Vector2 screenPosition)
+        {
+            if (EventSystem.current == null)
+            {
+                return false;
+            }
+
+            PointerEventData eventData = new PointerEventData(EventSystem.current)
+            {
+                position = screenPosition
+            };
+
+            uiRaycastResults.Clear();
+            EventSystem.current.RaycastAll(eventData, uiRaycastResults);
+            return uiRaycastResults.Count > 0;
+        }
+
+        private static void CreateFloorContactShadow(Transform parent, Vector3 size)
+        {
+            GameObject shadow = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            shadow.name = "FloorContactShadow";
+            shadow.transform.SetParent(parent, false);
+            shadow.transform.localPosition = new Vector3(0f, 0.0015f, 0f);
+            shadow.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            shadow.transform.localScale = new Vector3(size.x, size.z, 1f);
+
+            Collider shadowCollider = shadow.GetComponent<Collider>();
+            if (shadowCollider != null)
+            {
+                Destroy(shadowCollider);
+            }
+
+            Renderer shadowRenderer = shadow.GetComponent<Renderer>();
+            if (shadowRenderer != null)
+            {
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader != null)
+                {
+                    Material mat = new Material(shader);
+                    mat.color = new Color(0f, 0f, 0f, 0.25f);
+                    shadowRenderer.sharedMaterial = mat;
+                }
+            }
+        }
+
+        private static void CreateBoxWireframe(Transform parent, Vector3 size)
+        {
+            GameObject wireObj = new GameObject("BoundingWireframe");
+            wireObj.transform.SetParent(parent, false);
+
+            LineRenderer lr = wireObj.AddComponent<LineRenderer>();
+            lr.useWorldSpace = false;
+            lr.loop = false;
+            lr.startWidth = 0.012f;
+            lr.endWidth = 0.012f;
+            lr.numCornerVertices = 2;
+
+            Shader lineShader = Shader.Find("Sprites/Default");
+            if (lineShader != null)
+            {
+                lr.sharedMaterial = new Material(lineShader);
+            }
+
+            Color wireColor = new Color(0.15f, 0.95f, 0.88f, 0.95f);
+            lr.startColor = wireColor;
+            lr.endColor = wireColor;
+
+            float hx = size.x * 0.5f;
+            float hz = size.z * 0.5f;
+            float h = size.y;
+
+            Vector3[] points =
+            {
+                new Vector3(-hx, 0f, -hz),
+                new Vector3( hx, 0f, -hz),
+                new Vector3( hx, 0f,  hz),
+                new Vector3(-hx, 0f,  hz),
+                new Vector3(-hx, 0f, -hz),
+                new Vector3(-hx,  h, -hz),
+                new Vector3( hx,  h, -hz),
+                new Vector3( hx,  h,  hz),
+                new Vector3(-hx,  h,  hz),
+                new Vector3(-hx,  h, -hz),
+                new Vector3( hx,  h, -hz),
+                new Vector3( hx, 0f, -hz),
+                new Vector3( hx, 0f,  hz),
+                new Vector3( hx,  h,  hz),
+                new Vector3(-hx,  h,  hz),
+                new Vector3(-hx, 0f,  hz)
+            };
+
+            lr.positionCount = points.Length;
+            lr.SetPositions(points);
+        }
+
+        private static void CreateFloorClearanceGuide(Transform parent, Vector3 size, float clearanceMeters)
+        {
+            GameObject guideObj = new GameObject("ClearanceGuideFloor");
+            guideObj.transform.SetParent(parent, false);
+
+            LineRenderer lr = guideObj.AddComponent<LineRenderer>();
+            lr.useWorldSpace = false;
+            lr.loop = true;
+            lr.startWidth = 0.008f;
+            lr.endWidth = 0.008f;
+
+            Shader lineShader = Shader.Find("Sprites/Default");
+            if (lineShader != null)
+            {
+                lr.sharedMaterial = new Material(lineShader);
+            }
+
+            Color guideColor = new Color(1.0f, 0.80f, 0.25f, 0.70f);
+            lr.startColor = guideColor;
+            lr.endColor = guideColor;
+
+            float hx = size.x * 0.5f + clearanceMeters;
+            float hz = size.z * 0.5f + clearanceMeters;
+            float y = 0.004f;
+
+            Vector3[] points =
+            {
+                new Vector3(-hx, y, -hz),
+                new Vector3( hx, y, -hz),
+                new Vector3( hx, y,  hz),
+                new Vector3(-hx, y,  hz)
+            };
+
+            lr.positionCount = points.Length;
+            lr.SetPositions(points);
         }
 
         /// <summary>

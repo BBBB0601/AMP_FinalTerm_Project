@@ -136,6 +136,7 @@ GameObject:
   - component: {fileID: 8175469}
   - component: {fileID: 8175468}
   - component: {fileID: 8175467}
+  - component: {fileID: 8175471}
   m_Layer: 0
   m_Name: XR Origin
   m_TagString: Untagged
@@ -158,7 +159,7 @@ MonoBehaviour:
   m_Camera: {fileID: 137085845}
   m_OriginBaseGameObject: {fileID: 8175461}
   m_CameraFloorOffsetObject: {fileID: 438369885}
-  m_RequestedTrackingOriginMode: 0
+  m_RequestedTrackingOriginMode: 1
   m_CameraYOffset: 1.1176
 --- !u!4 &8175463
 Transform:
@@ -241,6 +242,7 @@ MonoBehaviour:
   minAcceptableFps: 30
   memoryCleanupThresholdMB: 350
   checkIntervalSeconds: 5
+  enforceMemoryGuardInEditor: 0
 --- !u!114 &8175468
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -256,6 +258,8 @@ MonoBehaviour:
   placementReticle: {fileID: 8175469}
   anchorManager: {fileID: 8175464}
   bridgeManager: {fileID: 1499031447}
+  planeDetectionController: {fileID: 0}
+  requireFloorCalibrationBeforePlacement: 1
   autoPlaceOnDataReceived: 1
   twistRotationSensitivity: 1
   dragMoveSmoothSpeed: 25
@@ -281,6 +285,9 @@ MonoBehaviour:
   raycastManager: {fileID: 8175465}
   planeManager: {fileID: 8175466}
   arCamera: {fileID: 137085845}
+  planeDetectionController: {fileID: 0}
+  enableVirtualFloorGapProjection: 1
+  maxVirtualFloorDistance: 4.5
   reticleVisualObject: {fileID: 0}
   surfaceVerticalOffset: 0.005
   poseLerpSpeed: 20
@@ -300,6 +307,28 @@ MonoBehaviour:
   planeManager: {fileID: 8175466}
   targetDetectionMode: 3
   attachColliderToVerticalWalls: 1
+  showVerticalWallVisuals: 0
+  hideCeilingPlanes: 1
+  floorPlaneFillColor: {r: 0.2, g: 0.78, b: 0.95, a: 0.08}
+  floorPlaneBorderColor: {r: 0.2, g: 0.85, b: 1, a: 0.35}
+  elevatedPlaneHideThreshold: 0.14
+  minDepthBelowCamera: 0.15
+--- !u!114 &8175471
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8175461}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 26afe972564efd140b72a0adccc2f25b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RoomFitAR.AR.ARCalibrationHudController
+  planeDetectionController: {fileID: 0}
+  placementReticle: {fileID: 0}
+  placementManipulator: {fileID: 0}
+  fineStepMeters: 0.02
 --- !u!1 &137085839
 GameObject:
   m_ObjectHideFlags: 0
@@ -314,6 +343,7 @@ GameObject:
   - component: {fileID: 137085843}
   - component: {fileID: 137085842}
   - component: {fileID: 137085841}
+  - component: {fileID: 137085846}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -534,6 +564,23 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
+--- !u!114 &137085846
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 137085839}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b15f82cc229284894964d2d30806969d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.XR.ARFoundation::UnityEngine.XR.ARFoundation.AROcclusionManager
+  m_HumanSegmentationStencilMode: 0
+  m_HumanSegmentationDepthMode: 0
+  m_EnvironmentDepthMode: 0
+  m_EnvironmentDepthTemporalSmoothing: 0
+  m_OcclusionPreferenceMode: 2
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0

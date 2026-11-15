@@ -26,6 +26,19 @@ namespace RoomFitAR.AR
         [Tooltip("AR 메인 카메라 (비워두면 Camera.main 자동 할당)")]
         private Camera arCamera;
 
+        [SerializeField]
+        [Tooltip("기준 바닥 높이 참조용 ARPlaneDetectionController (비워두면 자동 탐색)")]
+        private ARPlaneDetectionController planeDetectionController;
+
+        [Header("Floor Projection Settings")]
+        [SerializeField]
+        [Tooltip("실제 바닥 평면이 인식된 상태에서 평면 틈새/공백 구간을 기준 바닥 높이로 투영 허용할지 여부")]
+        private bool enableVirtualFloorGapProjection = true;
+
+        [SerializeField]
+        [Tooltip("가상 바닥 틈새 투영 시 허용되는 최대 레이 거리 (단위: m)")]
+        private float maxVirtualFloorDistance = 4.5f;
+
         [Header("Reticle Visual Settings")]
         [SerializeField]
         [Tooltip("조준점 표시용 오브젝트 또는 프리팹 (비워두면 런타임에 기본 마커 자동 생성)")]
@@ -66,6 +79,11 @@ namespace RoomFitAR.AR
             if (arCamera == null)
             {
                 arCamera = Camera.main;
+            }
+
+            if (planeDetectionController == null)
+            {
+                planeDetectionController = FindFirstObjectByType<ARPlaneDetectionController>();
             }
 
             EnsureReticleVisual();
@@ -109,21 +127,100 @@ namespace RoomFitAR.AR
             hitPlane = null;
 
             if (raycastManager != null &&
-                raycastManager.Raycast(screenPoint, raycastHits, TrackableType.PlaneWithinPolygon | TrackableType.PlaneEstimated))
+                raycastManager.Raycast(screenPoint, raycastHits, TrackableType.PlaneWithinPolygon))
             {
+                float lowestValidY = float.MaxValue;
+
+                bool isCalibrated = planeDetectionController != null && planeDetectionController.IsFloorCalibrated;
+                bool hasRefFloor = planeDetectionController != null && planeDetectionController.HasFloorReference;
+                float maxAllowedY = hasRefFloor
+                    ? planeDetectionController.CurrentFloorReferenceY + planeDetectionController.ElevatedPlaneHideThreshold
+                    : float.MaxValue;
+                float minDepthBelowCam = planeDetectionController != null
+                    ? planeDetectionController.MinDepthBelowCamera
+                    : 0.15f;
+
                 for (int i = 0; i < raycastHits.Count; i++)
                 {
                     ARRaycastHit hit = raycastHits[i];
                     ARPlane plane = ResolvePlane(hit);
 
-                    if (plane != null && plane.alignment != PlaneAlignment.HorizontalUp)
+                    if (!IsValidFloorHit(hit, plane, hasRefFloor, maxAllowedY, minDepthBelowCam))
                     {
                         continue;
                     }
 
+                    if (hit.pose.position.y < lowestValidY)
+                    {
+                        lowestValidY = hit.pose.position.y;
+                    }
+                }
+
+                if (lowestValidY < float.MaxValue)
+                {
+                    const float floorBandTolerance = 0.05f;
+                    bool foundBestHit = false;
+                    ARRaycastHit bestFloorHit = default;
+                    ARPlane bestFloorPlane = null;
+                    float bestArea = -1f;
+
+                    for (int i = 0; i < raycastHits.Count; i++)
+                    {
+                        ARRaycastHit hit = raycastHits[i];
+                        ARPlane plane = ResolvePlane(hit);
+
+                        if (!IsValidFloorHit(hit, plane, hasRefFloor, maxAllowedY, minDepthBelowCam))
+                        {
+                            continue;
+                        }
+
+                        // 최하단 바닥대(5cm 이내) 중 가장 넓은 안정 평면을 우선 선택
+                        if (hit.pose.position.y <= lowestValidY + floorBandTolerance)
+                        {
+                            float area = plane.size.x * plane.size.y;
+                            if (!foundBestHit || area > bestArea)
+                            {
+                                foundBestHit = true;
+                                bestFloorHit = hit;
+                                bestFloorPlane = plane;
+                                bestArea = area;
+                            }
+                        }
+                    }
+
+                    if (foundBestHit)
+                    {
+                        Vector3 hitPos = bestFloorHit.pose.position;
+                        if (isCalibrated)
+                        {
+                            hitPos.y = planeDetectionController.CalibratedFloorY;
+                        }
+
+                        Vector3 forward = CalculateCameraHorizontalForward();
+                        hitPose = new Pose(hitPos, Quaternion.LookRotation(forward, Vector3.up));
+                        hitPlane = bestFloorPlane;
+                        return true;
+                    }
+                }
+            }
+
+            // 사용자가 바닥 높이를 수동 확정한 상태에서만 무늬 없는 문앞/틈새 공백 구간을 확정 바닥 높이로 투영
+            if (enableVirtualFloorGapProjection &&
+                arCamera != null &&
+                planeDetectionController != null &&
+                planeDetectionController.IsFloorCalibrated)
+            {
+                Ray ray = arCamera.ScreenPointToRay(screenPoint);
+                Plane calibratedFloor = new Plane(Vector3.up, new Vector3(0f, planeDetectionController.CalibratedFloorY, 0f));
+
+                if (calibratedFloor.Raycast(ray, out float enterDistance) &&
+                    enterDistance >= 0.35f &&
+                    enterDistance <= maxVirtualFloorDistance)
+                {
+                    Vector3 hitPoint = ray.GetPoint(enterDistance);
                     Vector3 forward = CalculateCameraHorizontalForward();
-                    hitPose = new Pose(hit.pose.position, Quaternion.LookRotation(forward, Vector3.up));
-                    hitPlane = plane;
+                    hitPose = new Pose(hitPoint, Quaternion.LookRotation(forward, Vector3.up));
+                    hitPlane = planeDetectionController.LowestFloorPlane;
                     return true;
                 }
             }
@@ -196,6 +293,34 @@ namespace RoomFitAR.AR
             float t = Mathf.Clamp01(Time.deltaTime * poseLerpSpeed);
             visualTransform.position = Vector3.Lerp(visualTransform.position, targetPosition, t);
             visualTransform.rotation = Quaternion.Slerp(visualTransform.rotation, targetRotation, t);
+        }
+
+        private bool IsValidFloorHit(
+            ARRaycastHit hit,
+            ARPlane plane,
+            bool hasRefFloor,
+            float maxAllowedY,
+            float minDepthBelowCam)
+        {
+            if (plane == null ||
+                plane.alignment != PlaneAlignment.HorizontalUp ||
+                plane.subsumedBy != null ||
+                plane.trackingState == TrackingState.None)
+            {
+                return false;
+            }
+
+            if (arCamera != null && hit.pose.position.y >= arCamera.transform.position.y - minDepthBelowCam)
+            {
+                return false;
+            }
+
+            if (hasRefFloor && hit.pose.position.y > maxAllowedY)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private ARPlane ResolvePlane(ARRaycastHit hit)
