@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 5872571955499539124}
   - component: {fileID: 1282454327812541506}
   - component: {fileID: 3798532688228616258}
+  - component: {fileID: 6244835740282930543}
   m_Layer: 0
   m_Name: Furniture
   m_TagString: Untagged
@@ -126,14 +127,33 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a87c0b20a1ff9d24db8c12532cac21f5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: FurnitureAR::cshFurniture
-  furnitureId: 
   furnitureName: 
-  widthCm: 100
-  depthCm: 50
-  heightCm: 80
+  width: 1.2
+  depth: 0.6
+  height: 0.75
   bodyFilter: {fileID: 1187140760296451655}
   edgeFilter: {fileID: 9177781232321245478}
   boxCollider: {fileID: 1282454327812541506}
+  guideFilter: {fileID: 0}
+  safeColor: {r: 0, g: 0.85, b: 0.8, a: 0.35}
+  collidingColor: {r: 1, g: 0.1, b: 0.1, a: 0.6}
+  guideColor: {r: 1, g: 0.85, b: 0, a: 0.4}
+  isPlaced: 0
+  isColliding: 0
+--- !u!114 &6244835740282930543
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2691617333324967932}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6731e7f5efbc4414c94d28643bf56136, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::cshCollisionChecker
+  furniture: {fileID: 3798532688228616258}
+  tolerance: 0.01
 --- !u!1 &5594801125776487377
 GameObject:
   m_ObjectHideFlags: 0

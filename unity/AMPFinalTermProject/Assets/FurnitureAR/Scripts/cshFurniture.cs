@@ -1,7 +1,4 @@
 using UnityEngine;
-using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
-
 
 public class cshFurniture : MonoBehaviour
 {
@@ -27,11 +24,8 @@ public class cshFurniture : MonoBehaviour
     public Color collidingColor = new Color(1.0f, 0.1f, 0.1f, 0.6f);    // 충돌: 빨강
     public Color guideColor = new Color(1.0f, 0.85f, 0.0f, 0.4f);       // 동선: 노랑
 
-    [Header("충돌 판정")]
-    public float tolerance = 0.01f;  // 1cm 이내로 맞닿은 것은 충돌로 보지 않음 (바닥, 옆 가구에 딱 붙인 경우)
-
     public bool isPlaced = false;     // "배치하기"로 고정됐는지
-    public bool isColliding = false;  // 지금 벽/다른 가구와 겹쳐 있는지
+    public bool isColliding = false;  // 지금 벽/다른 가구와 겹쳐 있는지 (cshCollisionChecker가 판정)
 
     private Mesh bodyMesh;
     private Mesh edgeMesh;
@@ -223,51 +217,13 @@ public class cshFurniture : MonoBehaviour
         }
     }
 
-    // ----------  OBB 충돌 판정 ----------
+    // ---------- 충돌 표시 (판정은 cshCollisionChecker) ----------
 
-    void Update()
+    // 충돌 상태를 바꾸고 색을 바꿈 (안전: 청록 / 충돌: 빨강)
+    public void SetColliding(bool colliding)
     {
-        bool colliding = CheckCollision();
-        if (colliding != isColliding)
-        {
-            isColliding = colliding;
-            UpdateColor();
-
-            // 전체 충돌 상태는 Spawner가 모아서 Android로 알림
-            if (cshFurnitureSpawner.instance != null)
-            {
-                cshFurnitureSpawner.instance.OnFurnitureCollisionChanged(this);
-            }
-        }
-    }
-
-    // 가구의 회전까지 반영한 상자(OBB)와 겹치는 벽면 / 다른 가구가 있는지 검사
-    public bool CheckCollision()
-    {
-        // 바닥이나 옆 가구에 딱 붙은 것까지 충돌로 보지 않도록 사방을 tolerance만큼 줄임
-        Vector3 half = new Vector3(width * 0.5f - tolerance, height * 0.5f - tolerance, depth * 0.5f - tolerance);
-        Vector3 center = transform.TransformPoint(new Vector3(0.0f, height * 0.5f, 0.0f));
-
-        // 다른 가구의 BoxCollider는 Is Trigger라서 Collide로 함께 검사
-        Collider[] hits = Physics.OverlapBox(center, half, transform.rotation, ~0, QueryTriggerInteraction.Collide);
-
-        foreach (Collider hit in hits)
-        {
-            // 다른 가구
-            cshFurniture other = hit.GetComponentInParent<cshFurniture>();
-            if (other != null && other != this)
-            {
-                return true;
-            }
-
-            // ARCore가 인식한 벽면 (바닥면은 가구가 올라가 있으므로 제외)
-            ARPlane plane = hit.GetComponentInParent<ARPlane>();
-            if (plane != null && plane.alignment == PlaneAlignment.Vertical)
-            {
-                return true;
-            }
-        }
-        return false;
+        isColliding = colliding;
+        UpdateColor();
     }
 
     void UpdateColor()
