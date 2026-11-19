@@ -2,11 +2,10 @@ using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 
-// 제안서의 ProceduralFurnitureInstance: 치수만으로 만든 가구 한 개
-// SFR-003 메시 동적 생성 / SFR-005 OBB 충돌 판정 + 색 경고 / SFR-006 전면 동선 가이드
+
 public class cshFurniture : MonoBehaviour
 {
-    public string furnitureName;   // 이름 (예: 단독 책상)
+    public string furnitureName;   // 이름 
 
     // 치수는 m 단위 (Android가 cm → m 로 바꾼 FurnitureConfig를 보냄, SFR-001)
     public float width = 1.2f;     // 가로 W → X축
@@ -23,7 +22,7 @@ public class cshFurniture : MonoBehaviour
     public BoxCollider boxCollider;  // 충돌 영역
     public MeshFilter guideFilter;   // 전면 바닥 동선 가이드 (자식 ClearanceGuide)
 
-    [Header("색 (SFR-005, SFR-006)")]
+    [Header("색")]
     public Color safeColor = new Color(0.0f, 0.85f, 0.8f, 0.35f);       // 안전: 청록 반투명
     public Color collidingColor = new Color(1.0f, 0.1f, 0.1f, 0.6f);    // 충돌: 빨강
     public Color guideColor = new Color(1.0f, 0.85f, 0.0f, 0.4f);       // 동선: 노랑
@@ -70,7 +69,7 @@ public class cshFurniture : MonoBehaviour
         return m >= minSize && m <= maxSize;
     }
 
-    // ---------- SFR-003: 3D 체적 메시 ----------
+    // ---------- 3D 체적 메시 ----------
 
     void MakeBox()
     {
@@ -158,7 +157,7 @@ public class cshFurniture : MonoBehaviour
         }
     }
 
-    // 충돌 영역을 박스 크기에 맞춤. 없으면 붙임 (SFR-003 처리 로직 2)
+    // 충돌 영역을 박스 크기에 맞춤. 없으면 붙임
     void MakeCollider()
     {
         if (boxCollider == null)
@@ -224,7 +223,7 @@ public class cshFurniture : MonoBehaviour
         }
     }
 
-    // ---------- SFR-005: OBB 충돌 판정 ----------
+    // ----------  OBB 충돌 판정 ----------
 
     void Update()
     {

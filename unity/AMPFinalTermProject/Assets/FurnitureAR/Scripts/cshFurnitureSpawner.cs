@@ -2,9 +2,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 
-// Android가 보내는 FurnitureConfig JSON과 같은 모양 (SFR-001, SFR-002)
-// 치수는 Android에서 cm → m 로 바꿔서 보냄
-// 예) {"name":"단독 책상","width":1.2,"depth":0.6,"height":0.75}
 [System.Serializable]
 public class cshFurnitureConfig
 {
@@ -15,9 +12,6 @@ public class cshFurnitureConfig
 }
 
 // Android ↔ Unity 사이에서 가구를 만들고 관리함
-// 제안서(SFR-002) 호출 방식: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnReceiveFurnitureData", json)
-// → 이 스크립트를 "ARBridgeManager" 오브젝트에 붙이거나,
-//   브릿지 스크립트에서 cshFurnitureSpawner.instance.OnReceiveFurnitureData(json) 을 호출
 public class cshFurnitureSpawner : MonoBehaviour
 {
     public static cshFurnitureSpawner instance;  // 다른 스크립트에서 cshFurnitureSpawner.instance로 접근
@@ -47,7 +41,7 @@ public class cshFurnitureSpawner : MonoBehaviour
         instance = this;
     }
 
-    // ---------- Android → Unity (UnitySendMessage는 string 하나만 넘길 수 있음) ----------
+    // ---------- Android → Unity ----------
 
     // 치수 확정 시 호출. 배치 전인 가구가 있으면 그 가구의 치수를 바꾸고, 없으면 새로 만듦
     public void OnReceiveFurnitureData(string json)
