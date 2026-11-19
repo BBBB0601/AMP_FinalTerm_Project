@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 public class cshFurniture : MonoBehaviour
@@ -18,6 +19,11 @@ public class cshFurniture : MonoBehaviour
     public MeshFilter edgeFilter;    // 모서리 윤곽선 (자식 Edges)
     public BoxCollider boxCollider;  // 충돌 영역
     public MeshFilter guideFilter;   // 전면 바닥 동선 가이드 (자식 ClearanceGuide)
+
+    [Header("치수 라벨 (SFR-003)")]
+    public TextMeshPro widthLabel;   // 가로 치수 (윗면 앞 모서리 위, 예: 120cm)
+    public TextMeshPro heightLabel;  // 높이 치수 (앞 왼쪽 세로 모서리 옆, 예: 75cm)
+    public float labelGap = 0.03f;   // 모서리에서 라벨까지 3cm 띄움
 
     [Header("색")]
     public Color safeColor = new Color(0.0f, 0.85f, 0.8f, 0.35f);       // 안전: 청록 반투명
@@ -49,6 +55,7 @@ public class cshFurniture : MonoBehaviour
         MakeBox();
         MakeCollider();
         MakeGuide();
+        MakeLabels();
         return true;
     }
 
@@ -214,6 +221,50 @@ public class cshFurniture : MonoBehaviour
         if (guideFilter != null)
         {
             guideFilter.gameObject.SetActive(show);
+        }
+    }
+
+    // ---------- 치수 라벨 ----------
+
+    // 가로/높이 모서리에 실제 치수(cm)를 표시. 라벨은 cshLookCamera로 항상 카메라를 바라봄
+    void MakeLabels()
+    {
+        float x = width * 0.5f;
+        float z = -depth * 0.5f;   // 앞면(사용자 쪽)
+
+        if (widthLabel != null)
+        {
+            widthLabel.text = ToCmText(width);
+            // 윗면 앞 모서리 가운데 바로 위 (기준점을 글자 아래쪽 가운데로 → 글자가 모서리 위로 올라감)
+            widthLabel.rectTransform.pivot = new Vector2(0.5f, 0.0f);
+            widthLabel.transform.localPosition = new Vector3(0.0f, height + labelGap, z);
+        }
+
+        if (heightLabel != null)
+        {
+            heightLabel.text = ToCmText(height);
+            // 앞 왼쪽 세로 모서리 가운데 옆 (기준점을 글자 오른쪽 끝으로 → 글자가 모서리 바깥쪽으로 뻗음)
+            heightLabel.rectTransform.pivot = new Vector2(1.0f, 0.5f);
+            heightLabel.transform.localPosition = new Vector3(-x - labelGap, height * 0.5f, z);
+        }
+    }
+
+    // 0.75 → "75cm" (Android 입력이 cm 정수라 반올림해서 표시)
+    public static string ToCmText(float meters)
+    {
+        return Mathf.RoundToInt(meters * 100.0f) + "cm";
+    }
+
+    // 치수 라벨 켜고 끄기
+    public void ShowLabels(bool show)
+    {
+        if (widthLabel != null)
+        {
+            widthLabel.gameObject.SetActive(show);
+        }
+        if (heightLabel != null)
+        {
+            heightLabel.gameObject.SetActive(show);
         }
     }
 
