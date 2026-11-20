@@ -1,14 +1,27 @@
 package com.example.myapplication.model
 
+import org.json.JSONObject
+
 data class FurnitureConfig(
     val name: String,
     val widthCm: Float,
     val depthCm: Float,
-    val heightCm: Float
+    val heightCm: Float,
+    val isNew: Boolean = true
 ) {
     val widthM: Float get() = widthCm / 100f
     val depthM: Float get() = depthCm / 100f
     val heightM: Float get() = heightCm / 100f
+
+    fun toUnityJson(): String {
+        return JSONObject().apply {
+            put("name", name)
+            put("width", widthM.toDouble())
+            put("depth", depthM.toDouble())
+            put("height", heightM.toDouble())
+            put("unit", "meter")
+        }.toString()
+    }
 }
 
 data class PlacedFurniture(
