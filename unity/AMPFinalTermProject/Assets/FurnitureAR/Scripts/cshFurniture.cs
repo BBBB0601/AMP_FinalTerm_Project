@@ -1,7 +1,5 @@
+using TMPro;
 using UnityEngine;
-using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
-
 
 public class cshFurniture : MonoBehaviour
 {
@@ -22,16 +20,18 @@ public class cshFurniture : MonoBehaviour
     public BoxCollider boxCollider;  // 충돌 영역
     public MeshFilter guideFilter;   // 전면 바닥 동선 가이드 (자식 ClearanceGuide)
 
+    [Header("치수 라벨 (SFR-003)")]
+    public TextMeshPro widthLabel;   // 가로 치수 (윗면 앞 모서리 위, 예: 120cm)
+    public TextMeshPro heightLabel;  // 높이 치수 (앞 왼쪽 세로 모서리 옆, 예: 75cm)
+    public float labelGap = 0.03f;   // 모서리에서 라벨까지 3cm 띄움
+
     [Header("색")]
     public Color safeColor = new Color(0.0f, 0.85f, 0.8f, 0.35f);       // 안전: 청록 반투명
     public Color collidingColor = new Color(1.0f, 0.1f, 0.1f, 0.6f);    // 충돌: 빨강
     public Color guideColor = new Color(1.0f, 0.85f, 0.0f, 0.4f);       // 동선: 노랑
 
-    [Header("충돌 판정")]
-    public float tolerance = 0.01f;  // 1cm 이내로 맞닿은 것은 충돌로 보지 않음 (바닥, 옆 가구에 딱 붙인 경우)
-
     public bool isPlaced = false;     // "배치하기"로 고정됐는지
-    public bool isColliding = false;  // 지금 벽/다른 가구와 겹쳐 있는지
+    public bool isColliding = false;  // 지금 벽/다른 가구와 겹쳐 있는지 (cshCollisionChecker가 판정)
 
     private Mesh bodyMesh;
     private Mesh edgeMesh;
@@ -55,6 +55,7 @@ public class cshFurniture : MonoBehaviour
         MakeBox();
         MakeCollider();
         MakeGuide();
+        MakeLabels();
         return true;
     }
 
@@ -223,51 +224,57 @@ public class cshFurniture : MonoBehaviour
         }
     }
 
-    // ----------  OBB 충돌 판정 ----------
+    // ---------- 치수 라벨 ----------
 
-    void Update()
+    // 가로/높이 모서리에 실제 치수(cm)를 표시. 라벨은 cshLookCamera로 항상 카메라를 바라봄
+    void MakeLabels()
     {
-        bool colliding = CheckCollision();
-        if (colliding != isColliding)
-        {
-            isColliding = colliding;
-            UpdateColor();
+        float x = width * 0.5f;
+        float z = -depth * 0.5f;   // 앞면(사용자 쪽)
 
-            // 전체 충돌 상태는 Spawner가 모아서 Android로 알림
-            if (cshFurnitureSpawner.instance != null)
-            {
-                cshFurnitureSpawner.instance.OnFurnitureCollisionChanged(this);
-            }
+        if (widthLabel != null)
+        {
+            widthLabel.text = ToCmText(width);
+            // 윗면 앞 모서리 가운데 바로 위 (기준점을 글자 아래쪽 가운데로 → 글자가 모서리 위로 올라감)
+            widthLabel.rectTransform.pivot = new Vector2(0.5f, 0.0f);
+            widthLabel.transform.localPosition = new Vector3(0.0f, height + labelGap, z);
+        }
+
+        if (heightLabel != null)
+        {
+            heightLabel.text = ToCmText(height);
+            // 앞 왼쪽 세로 모서리 가운데 옆 (기준점을 글자 오른쪽 끝으로 → 글자가 모서리 바깥쪽으로 뻗음)
+            heightLabel.rectTransform.pivot = new Vector2(1.0f, 0.5f);
+            heightLabel.transform.localPosition = new Vector3(-x - labelGap, height * 0.5f, z);
         }
     }
 
-    // 가구의 회전까지 반영한 상자(OBB)와 겹치는 벽면 / 다른 가구가 있는지 검사
-    public bool CheckCollision()
+    // 0.75 → "75cm" (Android 입력이 cm 정수라 반올림해서 표시)
+    public static string ToCmText(float meters)
     {
-        // 바닥이나 옆 가구에 딱 붙은 것까지 충돌로 보지 않도록 사방을 tolerance만큼 줄임
-        Vector3 half = new Vector3(width * 0.5f - tolerance, height * 0.5f - tolerance, depth * 0.5f - tolerance);
-        Vector3 center = transform.TransformPoint(new Vector3(0.0f, height * 0.5f, 0.0f));
+        return Mathf.RoundToInt(meters * 100.0f) + "cm";
+    }
 
-        // 다른 가구의 BoxCollider는 Is Trigger라서 Collide로 함께 검사
-        Collider[] hits = Physics.OverlapBox(center, half, transform.rotation, ~0, QueryTriggerInteraction.Collide);
-
-        foreach (Collider hit in hits)
+    // 치수 라벨 켜고 끄기
+    public void ShowLabels(bool show)
+    {
+        if (widthLabel != null)
         {
-            // 다른 가구
-            cshFurniture other = hit.GetComponentInParent<cshFurniture>();
-            if (other != null && other != this)
-            {
-                return true;
-            }
-
-            // ARCore가 인식한 벽면 (바닥면은 가구가 올라가 있으므로 제외)
-            ARPlane plane = hit.GetComponentInParent<ARPlane>();
-            if (plane != null && plane.alignment == PlaneAlignment.Vertical)
-            {
-                return true;
-            }
+            widthLabel.gameObject.SetActive(show);
         }
-        return false;
+        if (heightLabel != null)
+        {
+            heightLabel.gameObject.SetActive(show);
+        }
+    }
+
+    // ---------- 충돌 표시 (판정은 cshCollisionChecker) ----------
+
+    // 충돌 상태를 바꾸고 색을 바꿈 (안전: 청록 / 충돌: 빨강)
+    public void SetColliding(bool colliding)
+    {
+        isColliding = colliding;
+        UpdateColor();
     }
 
     void UpdateColor()
