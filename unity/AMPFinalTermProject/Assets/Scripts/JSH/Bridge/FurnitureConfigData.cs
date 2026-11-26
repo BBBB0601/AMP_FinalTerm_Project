@@ -121,4 +121,17 @@ namespace RoomFitAR.Bridge
             return new CollisionEventData(true, TargetFurniture, customMessage);
         }
     }
+
+    /// <summary>
+    /// [SCR-002] Unity -> Android 바닥 캘리브레이션 상태 (RoomFitARActivity.OnCalibrationStateChanged).
+    /// </summary>
+    [Serializable]
+    public class CalibrationStateData
+    {
+        public bool isCalibrated;        // 바닥 높이 확정 완료
+        public bool hasFloorHit;         // 레티클이 지금 바닥을 맞추고 있음 ([여기가 바닥] 활성화 조건)
+        public bool hasActiveFurniture;  // 아직 확정 안 한 가구가 있음 ([위치 확정] 활성화 조건)
+        public int committedCount;       // 확정된 가구 수
+        public string status = string.Empty;  // 안내 문구
+    }
 }

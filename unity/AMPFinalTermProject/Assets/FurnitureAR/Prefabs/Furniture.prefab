@@ -137,6 +137,8 @@ MonoBehaviour:
   edgeFilter: {fileID: 9177781232321245478}
   boxCollider: {fileID: 1282454327812541506}
   guideFilter: {fileID: 0}
+  guideAllSides: 0
+  guideGridMaterial: {fileID: 2100000, guid: 81613103e3159b54196cce2710ba0b81, type: 2}
   widthLabel: {fileID: 4527199484452425454}
   heightLabel: {fileID: 4372401491573759346}
   labelGap: 0.03
@@ -159,6 +161,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::cshCollisionChecker
   furniture: {fileID: 3798532688228616258}
   tolerance: 0.01
+  lastCollisionTarget: NONE
 --- !u!1 &3463026989196415447
 GameObject:
   m_ObjectHideFlags: 0

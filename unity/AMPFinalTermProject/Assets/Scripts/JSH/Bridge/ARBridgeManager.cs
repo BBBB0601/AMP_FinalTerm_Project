@@ -36,6 +36,19 @@ namespace RoomFitAR.Bridge
         public event Action CancelFurnitureRequested;
         public event Action ResetPlacementRequested;
 
+        // [SCR-002] 바닥 캘리브레이션 (Android 네이티브 툴바 → Unity)
+        public event Action ConfirmFloorRequested;
+        public event Action<float> AdjustFloorRequested;      // 이동량 (m)
+        public event Action RecalibrateFloorRequested;
+
+        /// <summary>
+        /// Android 네이티브 툴바(RoomFitARActivity)가 화면을 맡고 있는지 여부 (Awake에서 JNI로 감지).
+        /// true면 Unity 임시 HUD(ARCalibrationHudController)는 화면에서 숨고 상태만 Android로 보낸다.
+        /// </summary>
+        public bool IsNativeToolbarHost { get; private set; }
+
+        private string lastCalibrationPayload;
+
         public FurnitureConfigData LatestFurnitureConfig { get; private set; }
         public bool IsLastStateColliding { get; private set; }
         public string LastCollisionTarget { get; private set; } = CollisionEventData.TargetNone;
@@ -57,6 +70,34 @@ namespace RoomFitAR.Bridge
                 Debug.LogWarning($"[ARBridgeManager] UnitySendMessage 수신 보장을 위해 오브젝트 이름을 '{gameObject.name}'에서 '{RequiredGameObjectName}'(으)로 변경합니다.");
                 gameObject.name = RequiredGameObjectName;
             }
+
+            IsNativeToolbarHost = DetectNativeToolbarHost();
+        }
+
+        /// <summary>
+        /// [SCR-002] 현재 Activity가 네이티브 툴바를 가진 RoomFitARActivity인지 JNI로 직접 물어본다.
+        /// UnitySendMessage는 씬 로드 전에 보내면 유실될 수 있어, 메시지 대신 Unity 쪽에서 직접 확인한다.
+        /// (에디터 / 단독 Unity 빌드에서는 false → 기존 Unity HUD 그대로 사용)
+        /// </summary>
+        private static bool DetectNativeToolbarHost()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
+                    return currentActivity != null && currentActivity.Call<bool>("isRoomFitNativeHost");
+                }
+            }
+            catch (Exception)
+            {
+                // 메서드가 없는 Activity(단독 Unity 빌드)면 예외 → 네이티브 툴바 없음
+                return false;
+            }
+#else
+            return false;
+#endif
         }
 
         private void OnDestroy()
@@ -180,6 +221,42 @@ namespace RoomFitAR.Bridge
             OnResetPlacement(unused);
         }
 
+        /// <summary>
+        /// [SFR-004 / SCR-002] 네이티브 [여기가 바닥] 버튼: 레티클이 맞은 바닥 높이로 캘리브레이션 확정.
+        /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnConfirmFloor", "")
+        /// </summary>
+        public void OnConfirmFloor(string unused = "")
+        {
+            Debug.Log("[ARBridgeManager] 바닥 높이 확정 요청 수신");
+            ConfirmFloorRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// [SFR-004 / SCR-002] 네이티브 [높이 ±2cm] 버튼: 확정된 바닥 높이 미세 보정.
+        /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnAdjustFloor", "-2" or "2") (단위: cm)
+        /// </summary>
+        public void OnAdjustFloor(string deltaCmString)
+        {
+            if (!float.TryParse(deltaCmString, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float deltaCm))
+            {
+                Debug.LogWarning($"[ARBridgeManager] 바닥 보정값을 해석할 수 없습니다: '{deltaCmString}'");
+                return;
+            }
+
+            AdjustFloorRequested?.Invoke(deltaCm * 0.01f);
+        }
+
+        /// <summary>
+        /// [SFR-004 / SCR-002] 네이티브 [바닥 재설정] 버튼: 배치 가구 초기화 후 바닥 캘리브레이션 다시 시작.
+        /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnRecalibrateFloor", "")
+        /// </summary>
+        public void OnRecalibrateFloor(string unused = "")
+        {
+            Debug.Log("[ARBridgeManager] 바닥 재설정 요청 수신");
+            RecalibrateFloorRequested?.Invoke();
+        }
+
         #endregion
 
         #region Unity -> Android 역방향 송신 메서드 (JNI Callback)
@@ -258,6 +335,47 @@ namespace RoomFitAR.Bridge
             }
 #else
             Debug.Log($"[ARBridgeManager -> Android Mock JNI] OnCollisionStateChanged({eventData.isColliding}) | JSON: {jsonPayload}");
+#endif
+        }
+
+        /// <summary>
+        /// [SCR-002] 바닥 캘리브레이션 진행 상태를 Android 네이티브 툴바로 보낸다 (내용이 바뀔 때만 JNI 호출).
+        /// Android: RoomFitARActivity.OnCalibrationStateChanged(json)
+        /// </summary>
+        public void ReportCalibrationState(bool isCalibrated, bool hasFloorHit, bool hasActiveFurniture, int committedCount, string status)
+        {
+            CalibrationStateData data = new CalibrationStateData
+            {
+                isCalibrated = isCalibrated,
+                hasFloorHit = hasFloorHit,
+                hasActiveFurniture = hasActiveFurniture,
+                committedCount = committedCount,
+                status = status ?? string.Empty
+            };
+
+            string jsonPayload = JsonUtility.ToJson(data);
+            if (string.Equals(jsonPayload, lastCalibrationPayload, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastCalibrationPayload = jsonPayload;
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
+                    currentActivity?.Call("OnCalibrationStateChanged", jsonPayload);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[ARBridgeManager] 캘리브레이션 상태 JNI 콜백 실패: {ex.Message} | Payload: {jsonPayload}");
+            }
+#else
+            Debug.Log($"[ARBridgeManager -> Android Mock JNI] OnCalibrationStateChanged | JSON: {jsonPayload}");
 #endif
         }
 

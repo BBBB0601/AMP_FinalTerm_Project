@@ -54,6 +54,14 @@ class RoomFitARActivity : UnityPlayerActivity() {
     private lateinit var titleBadge: TextView
     private lateinit var guideToggleButton: Button
 
+    // [SCR-002] 바닥 캘리브레이션 (Unity 임시 HUD 대신 네이티브에서 표시)
+    private lateinit var statusText: TextView
+    private lateinit var confirmFloorButton: Button
+    private lateinit var fineAdjustRow: LinearLayout
+    private lateinit var bottomToolbar: LinearLayout
+    private lateinit var placeButton: Button
+    private var hasReceivedCalibrationState = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -149,6 +157,24 @@ class RoomFitARActivity : UnityPlayerActivity() {
         headerRow.addView(titleBadge)
         topColumn.addView(headerRow)
 
+        // Unity가 보내는 단계 안내 문구 (예: "1단계: 발 앞 1m 실제 바닥을 비추며...")
+        statusText = TextView(this).apply {
+            text = "바닥을 인식하는 중..."
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = createRoundedBg(Color.parseColor("#B3111827"), dp(10))
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(8)
+            }
+        }
+        topColumn.addView(statusText)
+
         warningBanner = TextView(this).apply {
             text = "벽면 침범 발생"
             setTextColor(Color.WHITE)
@@ -167,10 +193,9 @@ class RoomFitARActivity : UnityPlayerActivity() {
         topColumn.addView(warningBanner)
         overlayContainer.addView(topColumn)
 
-        // 하단 AR 제어 툴바 (SCR-002)
-        val bottomToolbar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+        // 하단 영역: [바닥 캘리브레이션 버튼 / 미세 보정 줄] + AR 제어 툴바 (SCR-002)
+        val bottomColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -182,9 +207,58 @@ class RoomFitARActivity : UnityPlayerActivity() {
             }
         }
 
+        // 1단계: 바닥 높이 확정 (레티클이 바닥에 닿았을 때만 누를 수 있음)
+        confirmFloorButton = createOverlayButton("발 앞 바닥을 비춰주세요...", Color.parseColor("#E614B8A6")) {
+            sendToUnity("OnConfirmFloor", "")
+        }.apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(52)
+            ).apply {
+                leftMargin = dp(4)
+                rightMargin = dp(4)
+            }
+            visibility = View.GONE
+        }
+        bottomColumn.addView(confirmFloorButton)
+
+        // 2단계: 바닥 높이 미세 보정 / 바닥 재설정
+        fineAdjustRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(8)
+            }
+        }
+        fineAdjustRow.addView(createToolbarButton("높이 -2cm", Color.parseColor("#E6334155")) {
+            sendToUnity("OnAdjustFloor", "-2")
+        })
+        fineAdjustRow.addView(createToolbarButton("높이 +2cm", Color.parseColor("#E6334155")) {
+            sendToUnity("OnAdjustFloor", "2")
+        })
+        fineAdjustRow.addView(createToolbarButton("바닥 재설정", Color.parseColor("#E68C2D2D")) {
+            sendToUnity("OnRecalibrateFloor", "")
+        })
+        bottomColumn.addView(fineAdjustRow)
+
+        bottomToolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
         val btnPlace = createToolbarButton("위치 확정", Color.parseColor("#E60D9488")) {
             sendToUnity("OnPlaceFurniture", "")
         }
+        placeButton = btnPlace
 
         guideToggleButton = createToolbarButton("동선 ON", Color.parseColor("#E6D97706")) {
             isClearanceGuideOn = !isClearanceGuideOn
@@ -204,7 +278,8 @@ class RoomFitARActivity : UnityPlayerActivity() {
         bottomToolbar.addView(guideToggleButton)
         bottomToolbar.addView(btnCancel)
         bottomToolbar.addView(btnReset)
-        overlayContainer.addView(bottomToolbar)
+        bottomColumn.addView(bottomToolbar)
+        overlayContainer.addView(bottomColumn)
 
         rootLayout.addView(overlayContainer)
     }
@@ -218,6 +293,65 @@ class RoomFitARActivity : UnityPlayerActivity() {
     }
 
     // ---------- Unity -> Android JNI 콜백 (ARBridgeManager.cs에서 호출) ----------
+
+    /**
+     * [SCR-002] Unity(ARBridgeManager)가 시작할 때 JNI로 호출해 네이티브 툴바가 있는지 확인한다.
+     * true를 돌려주면 Unity 임시 HUD(ARCalibrationHudController)는 화면에서 숨는다.
+     */
+    @Keep
+    @Suppress("unused", "FunctionName")
+    fun isRoomFitNativeHost(): Boolean = true
+
+    /**
+     * [SCR-002] 바닥 캘리브레이션 진행 상태 (상태가 바뀔 때만 호출됨).
+     * JSON: {"isCalibrated":bool,"hasFloorHit":bool,"hasActiveFurniture":bool,"committedCount":int,"status":string}
+     */
+    @Keep
+    @Suppress("unused", "FunctionName")
+    fun OnCalibrationStateChanged(jsonPayload: String) {
+        try {
+            val json = JSONObject(jsonPayload)
+            val isCalibrated = json.optBoolean("isCalibrated", false)
+            val hasFloorHit = json.optBoolean("hasFloorHit", false)
+            val hasActiveFurniture = json.optBoolean("hasActiveFurniture", false)
+            val status = json.optString("status", "")
+            runOnUiThread {
+                hasReceivedCalibrationState = true
+                applyCalibrationUi(isCalibrated, hasFloorHit, hasActiveFurniture, status)
+            }
+        } catch (_: Throwable) {
+            // JSON 파싱 실패 시 무시
+        }
+    }
+
+    private fun applyCalibrationUi(
+        isCalibrated: Boolean,
+        hasFloorHit: Boolean,
+        hasActiveFurniture: Boolean,
+        status: String
+    ) {
+        if (status.isNotBlank()) {
+            statusText.text = status
+            statusText.visibility = View.VISIBLE
+        }
+
+        if (!isCalibrated) {
+            // 1단계: 바닥 확정 버튼만 표시 (다른 조작 버튼은 바닥 확정 전에는 의미가 없음)
+            confirmFloorButton.visibility = View.VISIBLE
+            confirmFloorButton.isEnabled = hasFloorHit
+            confirmFloorButton.alpha = if (hasFloorHit) 1f else 0.55f
+            confirmFloorButton.text = if (hasFloorHit) "여기가 바닥 (높이 확정)" else "발 앞 바닥을 비춰주세요..."
+            fineAdjustRow.visibility = View.GONE
+            bottomToolbar.visibility = View.GONE
+        } else {
+            // 2단계: 미세 보정 줄 + 기존 제어 툴바
+            confirmFloorButton.visibility = View.GONE
+            fineAdjustRow.visibility = View.VISIBLE
+            bottomToolbar.visibility = View.VISIBLE
+            placeButton.isEnabled = hasActiveFurniture
+            placeButton.alpha = if (hasActiveFurniture) 1f else 0.55f
+        }
+    }
 
     @Keep
     @Suppress("unused")

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
@@ -19,6 +20,10 @@ public class cshFurniture : MonoBehaviour
     public MeshFilter edgeFilter;    // 모서리 윤곽선 (자식 Edges)
     public BoxCollider boxCollider;  // 충돌 영역
     public MeshFilter guideFilter;   // 전면 바닥 동선 가이드 (자식 ClearanceGuide)
+
+    [Header("동선 가이드 (SFR-006)")]
+    public bool guideAllSides = false;       // false: 앞면만 W x 60cm (보고서 사양) / true: 사방 60cm (팀 합의 시)
+    public Material guideGridMaterial;       // 노란 점선 격자 머티리얼 (ClearanceGuide.mat). 비어 있으면 단색 노랑
 
     [Header("치수 라벨 (SFR-003)")]
     public TextMeshPro widthLabel;   // 가로 치수 (윗면 앞 모서리 위, 예: 120cm)
@@ -170,7 +175,14 @@ public class cshFurniture : MonoBehaviour
         boxCollider.isTrigger = true;  // 물리로 밀려나지 않고 겹침만 검사
     }
 
-    // ---------- SFR-006: 전면 동선 가이드 (가로 W x 60cm) ----------
+    // ---------- SFR-006: 통행 동선 가이드 (앞면 W x 60cm, 또는 사방 60cm) ----------
+
+    // 가이드 메시를 만들 때 사각형 정보를 모아 두는 목록
+    private List<Vector3> guideVertices = new List<Vector3>();
+    private List<Vector2> guideUv = new List<Vector2>();
+    private List<Vector2> guideSize = new List<Vector2>();
+    private List<Color> guideEdges = new List<Color>();
+    private List<int> guideTriangles = new List<int>();
 
     void MakeGuide()
     {
@@ -181,10 +193,16 @@ public class cshFurniture : MonoBehaviour
             guideFilter = guide.AddComponent<MeshFilter>();
             MeshRenderer guideRenderer = guide.AddComponent<MeshRenderer>();
             guideRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            guideRenderer.receiveShadows = false;
 
-            // 박스와 같은 반투명 셰이더를 노란색으로 복사해서 사용
-            if (bodyMaterial != null)
+            if (guideGridMaterial != null)
             {
+                // 노란 점선 격자 셰이더 (모든 가구가 같은 머티리얼을 함께 씀)
+                guideRenderer.sharedMaterial = guideGridMaterial;
+            }
+            else if (bodyMaterial != null)
+            {
+                // 격자 머티리얼이 없으면 박스와 같은 반투명 셰이더를 노란색으로 복사해서 사용
                 guideMaterial = new Material(bodyMaterial);
                 guideMaterial.color = guideColor;
                 guideRenderer.sharedMaterial = guideMaterial;
@@ -192,9 +210,29 @@ public class cshFurniture : MonoBehaviour
         }
 
         float x = width * 0.5f;
-        float zNear = -depth * 0.5f;              // 가구 앞면
-        float zFar = zNear - clearanceDepth;      // 앞면에서 60cm 앞
-        float y = 0.005f;                         // 바닥과 겹쳐 깜빡이지 않게 5mm 띄움
+        float z = depth * 0.5f;
+        float c = clearanceDepth;  // 60cm
+
+        guideVertices.Clear();
+        guideUv.Clear();
+        guideSize.Clear();
+        guideEdges.Clear();
+        guideTriangles.Clear();
+
+        if (guideAllSides == false)
+        {
+            // 앞면(사용자 쪽, -Z)만: 가로 W x 60cm, 테두리 4변 모두 점선
+            AddGuideRect(-x, x, -z - c, -z, true, true, true, true);
+        }
+        else
+        {
+            // 사방 60cm: 앞/뒤 띠는 모서리까지 포함해 넓게, 좌/우 띠는 그 사이만
+            // 띠끼리 맞닿는 변은 테두리를 그리지 않음 (바깥 둘레와 가구 쪽 변만 점선)
+            AddGuideRect(-x - c, x + c, -z - c, -z, true, true, true, true);   // 앞
+            AddGuideRect(-x - c, x + c, z, z + c, true, true, true, true);     // 뒤
+            AddGuideRect(-x - c, -x, -z, z, true, true, false, false);         // 왼쪽
+            AddGuideRect(x, x + c, -z, z, true, true, false, false);           // 오른쪽
+        }
 
         if (guideMesh == null)
         {
@@ -202,17 +240,49 @@ public class cshFurniture : MonoBehaviour
             guideMesh.name = "ClearanceGuide";
         }
         guideMesh.Clear();
-        guideMesh.vertices = new Vector3[]
-        {
-            new Vector3(-x, y, zFar),
-            new Vector3(-x, y, zNear),
-            new Vector3(x, y, zNear),
-            new Vector3(x, y, zFar),
-        };
-        guideMesh.triangles = new int[] { 0, 1, 2, 0, 2, 3 };  // 위에서 봤을 때 시계 방향
+        guideMesh.SetVertices(guideVertices);
+        guideMesh.SetUVs(0, guideUv);       // 사각형 안에서의 위치 (m)
+        guideMesh.SetUVs(1, guideSize);     // 사각형 크기 (m)
+        guideMesh.SetColors(guideEdges);    // 점선 테두리를 그릴 변
+        guideMesh.SetTriangles(guideTriangles, 0);
         guideMesh.RecalculateNormals();
         guideMesh.RecalculateBounds();
         guideFilter.sharedMesh = guideMesh;
+    }
+
+    // 바닥에 사각형 하나 추가 (xMin~xMax, zMin~zMax). left/right/near/far: 그 변에 점선 테두리를 그릴지
+    void AddGuideRect(float xMin, float xMax, float zMin, float zMax, bool left, bool right, bool near, bool far)
+    {
+        float y = 0.005f;  // 바닥과 겹쳐 깜빡이지 않게 5mm 띄움
+        float w = xMax - xMin;
+        float d = zMax - zMin;
+        int start = guideVertices.Count;
+
+        guideVertices.Add(new Vector3(xMin, y, zMin));
+        guideVertices.Add(new Vector3(xMin, y, zMax));
+        guideVertices.Add(new Vector3(xMax, y, zMax));
+        guideVertices.Add(new Vector3(xMax, y, zMin));
+
+        guideUv.Add(new Vector2(0.0f, 0.0f));
+        guideUv.Add(new Vector2(0.0f, d));
+        guideUv.Add(new Vector2(w, d));
+        guideUv.Add(new Vector2(w, 0.0f));
+
+        // r=왼쪽, g=오른쪽, b=아래(zMin), a=위(zMax)
+        Color edges = new Color(left ? 1.0f : 0.0f, right ? 1.0f : 0.0f, near ? 1.0f : 0.0f, far ? 1.0f : 0.0f);
+        for (int i = 0; i < 4; i++)
+        {
+            guideSize.Add(new Vector2(w, d));
+            guideEdges.Add(edges);
+        }
+
+        // 위에서 봤을 때 시계 방향
+        guideTriangles.Add(start + 0);
+        guideTriangles.Add(start + 1);
+        guideTriangles.Add(start + 2);
+        guideTriangles.Add(start + 0);
+        guideTriangles.Add(start + 2);
+        guideTriangles.Add(start + 3);
     }
 
     // Android "동선 가이드" 스위치로 켜고 끔

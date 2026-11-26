@@ -1,3 +1,4 @@
+using RoomFitAR.Bridge;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
@@ -9,6 +10,10 @@ namespace RoomFitAR.AR
     /// [SFR-004] 1회 바닥 높이 확정(캘리브레이션) 및 실시간 ±2cm 미세 높이 보정 HUD 컨트롤러.
     /// - 시작 시 발 앞 실제 바닥 평면을 조준한 뒤 [여기가 바닥] 버튼으로 기준 높이(CalibratedFloorY)를 잠근다.
     /// - 확정 이후에는 [-2cm] / [+2cm] 미세 보정, 가구 배치 초기화, 바닥 재설정 기능을 제공한다.
+    /// [SCR-002] Android 네이티브 툴바(RoomFitARActivity) 안에서 실행되면 이 Unity HUD는 화면에서 숨기고,
+    /// 같은 기능을 네이티브 버튼(OnConfirmFloor / OnAdjustFloor / OnRecalibrateFloor)으로 받아 처리하며
+    /// 진행 상태는 ARBridgeManager.ReportCalibrationState로 Android에 보낸다 (UI 겹침 방지).
+    /// 에디터·단독 Unity 빌드에서는 기존처럼 Unity HUD를 그대로 표시한다.
     /// </summary>
     [DisallowMultipleComponent]
     public class ARCalibrationHudController : MonoBehaviour
@@ -22,6 +27,10 @@ namespace RoomFitAR.AR
 
         [SerializeField]
         private ARAnchorPlacementManipulator placementManipulator;
+
+        [SerializeField]
+        [Tooltip("Android 네이티브 툴바 연동용 브릿지 (비워두면 씬에서 자동 탐색)")]
+        private ARBridgeManager bridgeManager;
 
         [Header("Calibration Settings")]
         [SerializeField]
@@ -56,13 +65,65 @@ namespace RoomFitAR.AR
                 placementManipulator = FindFirstObjectByType<ARAnchorPlacementManipulator>();
             }
 
+            if (bridgeManager == null)
+            {
+                bridgeManager = FindFirstObjectByType<ARBridgeManager>();
+            }
+
             EnsureEventSystem();
             BuildHudCanvas();
+        }
+
+        private void OnEnable()
+        {
+            if (bridgeManager != null)
+            {
+                bridgeManager.ConfirmFloorRequested += OnConfirmFloorClicked;
+                bridgeManager.AdjustFloorRequested += OnAdjustFloorRequested;
+                bridgeManager.RecalibrateFloorRequested += OnRecalibrateFloorClicked;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (bridgeManager != null)
+            {
+                bridgeManager.ConfirmFloorRequested -= OnConfirmFloorClicked;
+                bridgeManager.AdjustFloorRequested -= OnAdjustFloorRequested;
+                bridgeManager.RecalibrateFloorRequested -= OnRecalibrateFloorClicked;
+            }
+        }
+
+        private void Start()
+        {
+            // ARBridgeManager.Awake에서 네이티브 호스트 감지가 끝난 뒤 적용
+            ApplyNativeToolbarMode(IsNativeToolbarHost);
         }
 
         private void Update()
         {
             RefreshHudState();
+        }
+
+        private bool IsNativeToolbarHost => bridgeManager != null && bridgeManager.IsNativeToolbarHost;
+
+        /// <summary>
+        /// [SCR-002] 네이티브 툴바가 있으면 Unity HUD를 숨겨 겹침을 없앤다 (기능은 브릿지 이벤트로 계속 동작).
+        /// </summary>
+        private void ApplyNativeToolbarMode(bool isNative)
+        {
+            if (hudCanvas != null)
+            {
+                hudCanvas.gameObject.SetActive(!isNative);
+            }
+        }
+
+        private void OnAdjustFloorRequested(float deltaMeters)
+        {
+            if (planeDetectionController != null && planeDetectionController.IsFloorCalibrated)
+            {
+                planeDetectionController.AdjustCalibratedFloorY(deltaMeters);
+            }
         }
 
         private void OnConfirmFloorClicked()
@@ -111,6 +172,32 @@ namespace RoomFitAR.AR
             }
 
             bool isCalibrated = planeDetectionController.IsFloorCalibrated;
+            bool hasFloorHit = placementReticle.HasValidHit;
+            bool hasActive = placementManipulator != null && placementManipulator.HasPlacedFurniture;
+            bool hasAny = placementManipulator != null && placementManipulator.HasAnyFurniture;
+            int committedCount = placementManipulator != null ? placementManipulator.CommittedFurnitureCount : 0;
+
+            string status;
+            if (!isCalibrated)
+            {
+                status = hasFloorHit
+                    ? "1단계: 원이 실제 바닥에 닿았다면 아래 버튼으로 확정하세요"
+                    : "1단계: 발 앞 1m 실제 바닥을 비추며 살짝 움직여 주세요";
+            }
+            else
+            {
+                status = hasActive
+                    ? $"드래그: 이동 | 2손가락: 회전 | [위치 확정]으로 고정 (확정: {committedCount}개)"
+                    : $"2단계: 바닥을 탭해 가구를 배치하세요 (확정: {committedCount}개)";
+            }
+
+            // [SCR-002] 네이티브 툴바 모드: Unity HUD는 숨겨져 있으므로 상태만 Android로 보낸다 (바뀔 때만 전송)
+            if (IsNativeToolbarHost)
+            {
+                bridgeManager.ReportCalibrationState(isCalibrated, hasFloorHit, hasActive, committedCount, status);
+                return;
+            }
+
             if (calibrationPanel != null)
             {
                 calibrationPanel.SetActive(!isCalibrated);
@@ -121,9 +208,13 @@ namespace RoomFitAR.AR
                 adjustmentPanel.SetActive(isCalibrated);
             }
 
+            if (statusText != null)
+            {
+                statusText.text = status;
+            }
+
             if (!isCalibrated)
             {
-                bool hasFloorHit = placementReticle.HasValidHit;
                 if (confirmFloorButton != null)
                 {
                     confirmFloorButton.interactable = hasFloorHit;
@@ -142,20 +233,9 @@ namespace RoomFitAR.AR
                         ? "여기가 바닥 (높이 확정)"
                         : "발 앞 바닥을 비춰주세요...";
                 }
-
-                if (statusText != null)
-                {
-                    statusText.text = hasFloorHit
-                        ? "1단계: 원이 실제 바닥에 닿았다면 아래 버튼으로 확정하세요"
-                        : "1단계: 발 앞 1m 실제 바닥을 비추며 살짝 움직여 주세요";
-                }
             }
             else
             {
-                bool hasActive = placementManipulator != null && placementManipulator.HasPlacedFurniture;
-                bool hasAny = placementManipulator != null && placementManipulator.HasAnyFurniture;
-                int committedCount = placementManipulator != null ? placementManipulator.CommittedFurnitureCount : 0;
-
                 if (commitFurnitureButton != null)
                 {
                     commitFurnitureButton.interactable = hasActive;
@@ -164,13 +244,6 @@ namespace RoomFitAR.AR
                 if (resetFurnitureButton != null)
                 {
                     resetFurnitureButton.interactable = hasAny;
-                }
-
-                if (statusText != null)
-                {
-                    statusText.text = hasActive
-                        ? $"드래그: 이동 | 2손가락: 회전 | [위치 확정]으로 고정 (확정: {committedCount}개)"
-                        : $"2단계: 바닥을 탭해 가구를 배치하세요 (확정: {committedCount}개)";
                 }
             }
         }
