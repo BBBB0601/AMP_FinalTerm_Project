@@ -25,11 +25,15 @@ namespace RoomFitAR.Bridge
         public UnityEvent<FurnitureConfigData> onFurnitureConfigReceived = new();
         public UnityEvent<bool> onClearanceGuideToggled = new();
         public UnityEvent<bool> onPlacementLockToggled = new();
+        public UnityEvent onPlaceFurnitureRequested = new();
+        public UnityEvent onCancelFurnitureRequested = new();
         public UnityEvent onResetPlacementRequested = new();
 
         public event Action<FurnitureConfigData> FurnitureDataReceived;
         public event Action<bool> ClearanceGuideToggled;
         public event Action<bool> PlacementLockToggled;
+        public event Action PlaceFurnitureRequested;
+        public event Action CancelFurnitureRequested;
         public event Action ResetPlacementRequested;
 
         public FurnitureConfigData LatestFurnitureConfig { get; private set; }
@@ -133,7 +137,31 @@ namespace RoomFitAR.Bridge
         }
 
         /// <summary>
-        /// [SCR-002] Android에서 현재 배치된 가구를 초기화하고 다시 조준 모드로 돌아갈 때 호출.
+        /// [SCR-002] Android에서 현재 조작 중인 가구를 이 위치에 확정(ARAnchor 독립 고정)하고 다음 가구 배치를 준비할 때 호출.
+        /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnPlaceFurniture", "")
+        /// </summary>
+        public void OnPlaceFurniture(string unused = "")
+        {
+            Debug.Log("[ARBridgeManager] 현재 가구 위치 확정(Commit) 요청 수신");
+
+            PlaceFurnitureRequested?.Invoke();
+            onPlaceFurnitureRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// [SCR-002] Android에서 아직 확정하지 않은 현재 조작 가구만 취소(제거)할 때 호출.
+        /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnCancelFurniture", "")
+        /// </summary>
+        public void OnCancelFurniture(string unused = "")
+        {
+            Debug.Log("[ARBridgeManager] 현재 가구 배치 취소 요청 수신");
+
+            CancelFurnitureRequested?.Invoke();
+            onCancelFurnitureRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// [SCR-002] Android에서 현재 배치된 모든 가구를 초기화하고 다시 조준 모드로 돌아갈 때 호출.
         /// 호출 규격: UnityPlayer.UnitySendMessage("ARBridgeManager", "OnResetPlacement", "")
         /// </summary>
         public void OnResetPlacement(string unused = "")
@@ -142,6 +170,14 @@ namespace RoomFitAR.Bridge
 
             ResetPlacementRequested?.Invoke();
             onResetPlacementRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// cshFurnitureSpawner 호환용 별칭 (OnResetPlacement로 위임).
+        /// </summary>
+        public void OnResetFurniture(string unused = "")
+        {
+            OnResetPlacement(unused);
         }
 
         #endregion

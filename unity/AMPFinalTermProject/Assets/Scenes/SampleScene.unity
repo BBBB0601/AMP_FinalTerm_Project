@@ -137,6 +137,7 @@ GameObject:
   - component: {fileID: 8175468}
   - component: {fileID: 8175467}
   - component: {fileID: 8175471}
+  - component: {fileID: 8175472}
   m_Layer: 0
   m_Name: XR Origin
   m_TagString: Untagged
@@ -329,6 +330,22 @@ MonoBehaviour:
   placementReticle: {fileID: 0}
   placementManipulator: {fileID: 0}
   fineStepMeters: 0.02
+--- !u!114 &8175472
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8175461}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cecc5cf4f41890a478552e3d31791379, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RoomFitAR.AR.ARFurnitureBridgeAdapter
+  furniturePrefab: {fileID: 2691617333324967932, guid: f028a31d564b51d42905942da63ef225, type: 3}
+  placementManipulator: {fileID: 0}
+  bridgeManager: {fileID: 0}
+  showClearanceGuideByDefault: 1
 --- !u!1 &137085839
 GameObject:
   m_ObjectHideFlags: 0
@@ -886,6 +903,12 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   onPlacementLockToggled:
+    m_PersistentCalls:
+      m_Calls: []
+  onPlaceFurnitureRequested:
+    m_PersistentCalls:
+      m_Calls: []
+  onCancelFurnitureRequested:
     m_PersistentCalls:
       m_Calls: []
   onResetPlacementRequested:

@@ -35,6 +35,7 @@ namespace RoomFitAR.AR
         private Image confirmFloorButtonBg;
         private Text confirmFloorButtonLabel;
         private GameObject adjustmentPanel;
+        private Button commitFurnitureButton;
         private Button resetFurnitureButton;
         private Font runtimeFont;
 
@@ -84,6 +85,11 @@ namespace RoomFitAR.AR
         private void OnRaiseFloorClicked()
         {
             planeDetectionController?.AdjustCalibratedFloorY(fineStepMeters);
+        }
+
+        private void OnCommitFurnitureClicked()
+        {
+            placementManipulator?.CommitCurrentFurniture();
         }
 
         private void OnResetFurnitureClicked()
@@ -146,17 +152,25 @@ namespace RoomFitAR.AR
             }
             else
             {
-                bool hasPlaced = placementManipulator != null && placementManipulator.HasPlacedFurniture;
+                bool hasActive = placementManipulator != null && placementManipulator.HasPlacedFurniture;
+                bool hasAny = placementManipulator != null && placementManipulator.HasAnyFurniture;
+                int committedCount = placementManipulator != null ? placementManipulator.CommittedFurnitureCount : 0;
+
+                if (commitFurnitureButton != null)
+                {
+                    commitFurnitureButton.interactable = hasActive;
+                }
+
                 if (resetFurnitureButton != null)
                 {
-                    resetFurnitureButton.interactable = hasPlaced;
+                    resetFurnitureButton.interactable = hasAny;
                 }
 
                 if (statusText != null)
                 {
-                    statusText.text = hasPlaced
-                        ? "드래그: 이동  |  2손가락: 회전  |  안 맞으면 ±2cm 보정"
-                        : "2단계: 바닥을 탭해 가구를 배치하세요";
+                    statusText.text = hasActive
+                        ? $"드래그: 이동 | 2손가락: 회전 | [위치 확정]으로 고정 (확정: {committedCount}개)"
+                        : $"2단계: 바닥을 탭해 가구를 배치하세요 (확정: {committedCount}개)";
                 }
             }
         }
@@ -271,13 +285,15 @@ namespace RoomFitAR.AR
             layout.childForceExpandHeight = true;
 
             Color stepColor = new Color(0.16f, 0.22f, 0.28f, 0.90f);
+            Color commitColor = new Color(0.08f, 0.62f, 0.50f, 0.92f);
             Color actionColor = new Color(0.10f, 0.45f, 0.62f, 0.92f);
             Color resetColor = new Color(0.55f, 0.22f, 0.22f, 0.92f);
 
-            CreateButton(adjustmentPanel.transform, "BtnLower2cm", "높이 -2cm", 28, stepColor, OnLowerFloorClicked, out _, out _);
-            CreateButton(adjustmentPanel.transform, "BtnRaise2cm", "높이 +2cm", 28, stepColor, OnRaiseFloorClicked, out _, out _);
-            resetFurnitureButton = CreateButton(adjustmentPanel.transform, "BtnResetFurniture", "가구 다시놓기", 28, actionColor, OnResetFurnitureClicked, out _, out _);
-            CreateButton(adjustmentPanel.transform, "BtnRecalibrate", "바닥 재설정", 28, resetColor, OnRecalibrateFloorClicked, out _, out _);
+            CreateButton(adjustmentPanel.transform, "BtnLower2cm", "높이 -2cm", 26, stepColor, OnLowerFloorClicked, out _, out _);
+            CreateButton(adjustmentPanel.transform, "BtnRaise2cm", "높이 +2cm", 26, stepColor, OnRaiseFloorClicked, out _, out _);
+            commitFurnitureButton = CreateButton(adjustmentPanel.transform, "BtnCommitFurniture", "위치 확정", 26, commitColor, OnCommitFurnitureClicked, out _, out _);
+            resetFurnitureButton = CreateButton(adjustmentPanel.transform, "BtnResetFurniture", "전체 초기화", 26, actionColor, OnResetFurnitureClicked, out _, out _);
+            CreateButton(adjustmentPanel.transform, "BtnRecalibrate", "바닥 재설정", 26, resetColor, OnRecalibrateFloorClicked, out _, out _);
         }
 
         private Button CreateButton(

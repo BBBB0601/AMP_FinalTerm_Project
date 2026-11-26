@@ -72,11 +72,22 @@ namespace RoomFitAR.AR
         public ARAnchor CurrentBoundAnchor { get; private set; }
         public bool IsPlacementLocked { get; private set; }
         public bool HasPlacedFurniture => PlacedFurnitureInstance != null;
+        public int CommittedFurnitureCount => committedEntries.Count;
+        public bool HasAnyFurniture => HasPlacedFurniture || committedEntries.Count > 0;
 
         public event Action<GameObject, FurnitureConfigData> FurniturePlacedOrUpdated;
+        public event Action<GameObject> FurnitureCommitted;
         public event Action<Pose> FurniturePoseChanged;
         public event Action FurnitureRemoved;
 
+        private sealed class CommittedFurnitureEntry
+        {
+            public GameObject instance;
+            public ARAnchor anchor;
+            public ARPlane plane;
+        }
+
+        private readonly List<CommittedFurnitureEntry> committedEntries = new();
         private ARPlane lastHitFloorPlane;
         private Vector3 targetDragPosition;
         private bool isDraggingSingleFinger;
@@ -117,6 +128,8 @@ namespace RoomFitAR.AR
             {
                 bridgeManager.FurnitureDataReceived += OnFurnitureDataReceived;
                 bridgeManager.PlacementLockToggled += SetPlacementLocked;
+                bridgeManager.PlaceFurnitureRequested += OnPlaceFurnitureRequested;
+                bridgeManager.CancelFurnitureRequested += CancelCurrentFurniture;
                 bridgeManager.ResetPlacementRequested += ResetPlacedFurniture;
             }
 
@@ -133,6 +146,8 @@ namespace RoomFitAR.AR
             {
                 bridgeManager.FurnitureDataReceived -= OnFurnitureDataReceived;
                 bridgeManager.PlacementLockToggled -= SetPlacementLocked;
+                bridgeManager.PlaceFurnitureRequested -= OnPlaceFurnitureRequested;
+                bridgeManager.CancelFurnitureRequested -= CancelCurrentFurniture;
                 bridgeManager.ResetPlacementRequested -= ResetPlacedFurniture;
             }
 
@@ -225,7 +240,76 @@ namespace RoomFitAR.AR
         }
 
         /// <summary>
-        /// 배치된 가상 가구와 ARAnchor를 제거하고 초기 조준 상태로 복귀한다.
+        /// [SCR-002 / 다중 가구] 현재 조작 중인 가구와 해당 ARAnchor를 독립 고정 리스트로 확정 보존하고,
+        /// 다음 가구를 새로 배치할 수 있도록 조작 슬롯과 레티클을 초기화한다.
+        /// </summary>
+        public bool CommitCurrentFurniture()
+        {
+            if (PlacedFurnitureInstance == null)
+            {
+                return false;
+            }
+
+            isDraggingSingleFinger = false;
+            isTwistingTwoFingers = false;
+
+            if (CurrentBoundAnchor == null)
+            {
+                BindToARAnchor(lastHitFloorPlane);
+            }
+
+            GameObject committedInstance = PlacedFurnitureInstance;
+            committedEntries.Add(new CommittedFurnitureEntry
+            {
+                instance = committedInstance,
+                anchor = CurrentBoundAnchor,
+                plane = lastHitFloorPlane
+            });
+
+            PlacedFurnitureInstance = null;
+            CurrentBoundAnchor = null;
+            IsPlacementLocked = false;
+
+            if (placementReticle != null)
+            {
+                placementReticle.SetReticleSuppressed(false);
+            }
+
+            FurnitureCommitted?.Invoke(committedInstance);
+            return true;
+        }
+
+        private void OnPlaceFurnitureRequested()
+        {
+            CommitCurrentFurniture();
+        }
+
+        /// <summary>
+        /// 아직 확정(Commit)하지 않은 현재 조작 중인 가구만 취소하여 제거한다.
+        /// </summary>
+        public void CancelCurrentFurniture()
+        {
+            isDraggingSingleFinger = false;
+            isTwistingTwoFingers = false;
+
+            if (PlacedFurnitureInstance != null)
+            {
+                Destroy(PlacedFurnitureInstance);
+                PlacedFurnitureInstance = null;
+            }
+
+            DetachAndDestroyCurrentAnchor();
+
+            if (placementReticle != null)
+            {
+                placementReticle.SetReticleSuppressed(false);
+            }
+
+            FurnitureRemoved?.Invoke();
+        }
+
+        /// <summary>
+        /// 배치된 모든 가상 가구(현재 조작 중 + 확정 고정분)와 ARAnchor를 제거하고 초기 조준 상태로 복귀한다.
         /// </summary>
         public void ResetPlacedFurniture()
         {
@@ -239,6 +323,27 @@ namespace RoomFitAR.AR
             }
 
             DetachAndDestroyCurrentAnchor();
+
+            for (int i = 0; i < committedEntries.Count; i++)
+            {
+                CommittedFurnitureEntry entry = committedEntries[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                if (entry.instance != null)
+                {
+                    Destroy(entry.instance);
+                }
+
+                if (entry.anchor != null)
+                {
+                    Destroy(entry.anchor.gameObject);
+                }
+            }
+
+            committedEntries.Clear();
 
             if (placementReticle != null)
             {
@@ -553,21 +658,91 @@ namespace RoomFitAR.AR
 
         private void OnCalibratedFloorYChanged(float newFloorY)
         {
-            if (PlacedFurnitureInstance == null)
+            if (PlacedFurnitureInstance != null)
+            {
+                DetachFromAnchorPreservingWorldTransform();
+                Vector3 pos = PlacedFurnitureInstance.transform.position;
+                pos.y = newFloorY;
+                PlacedFurnitureInstance.transform.position = pos;
+                targetDragPosition = pos;
+                BindToARAnchor(lastHitFloorPlane ?? planeDetectionController?.LowestFloorPlane);
+
+                FurniturePoseChanged?.Invoke(new Pose(
+                    PlacedFurnitureInstance.transform.position,
+                    PlacedFurnitureInstance.transform.rotation));
+            }
+
+            for (int i = committedEntries.Count - 1; i >= 0; i--)
+            {
+                CommittedFurnitureEntry entry = committedEntries[i];
+                if (entry == null || entry.instance == null)
+                {
+                    committedEntries.RemoveAt(i);
+                    continue;
+                }
+
+                RebindCommittedEntryAtFloorY(entry, newFloorY);
+            }
+        }
+
+        private async void RebindCommittedEntryAtFloorY(CommittedFurnitureEntry entry, float newFloorY)
+        {
+            if (entry == null || entry.instance == null)
             {
                 return;
             }
 
-            DetachFromAnchorPreservingWorldTransform();
-            Vector3 pos = PlacedFurnitureInstance.transform.position;
-            pos.y = newFloorY;
-            PlacedFurnitureInstance.transform.position = pos;
-            targetDragPosition = pos;
-            BindToARAnchor(lastHitFloorPlane ?? planeDetectionController?.LowestFloorPlane);
+            if (entry.instance.transform.parent != null)
+            {
+                entry.instance.transform.SetParent(null, true);
+            }
 
-            FurniturePoseChanged?.Invoke(new Pose(
-                PlacedFurnitureInstance.transform.position,
-                PlacedFurnitureInstance.transform.rotation));
+            if (entry.anchor != null)
+            {
+                Destroy(entry.anchor.gameObject);
+                entry.anchor = null;
+            }
+
+            Vector3 pos = entry.instance.transform.position;
+            pos.y = newFloorY;
+            entry.instance.transform.position = pos;
+
+            if (anchorManager == null || !anchorManager.enabled ||
+                anchorManager.subsystem == null || !anchorManager.subsystem.running)
+            {
+                return;
+            }
+
+            Pose pose = new Pose(entry.instance.transform.position, entry.instance.transform.rotation);
+            ARPlane plane = entry.plane ?? planeDetectionController?.LowestFloorPlane;
+            ARAnchor newAnchor = null;
+
+            if (plane != null && plane.subsumedBy == null)
+            {
+                try
+                {
+                    newAnchor = anchorManager.AttachAnchor(plane, pose);
+                }
+                catch (Exception)
+                {
+                    newAnchor = null;
+                }
+            }
+
+            if (newAnchor == null)
+            {
+                var result = await anchorManager.TryAddAnchorAsync(pose);
+                if (result.status.IsSuccess())
+                {
+                    newAnchor = result.value;
+                }
+            }
+
+            if (newAnchor != null && entry.instance != null)
+            {
+                entry.anchor = newAnchor;
+                entry.instance.transform.SetParent(newAnchor.transform, true);
+            }
         }
 
         private void OnFloorCalibrationCleared()

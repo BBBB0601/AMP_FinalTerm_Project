@@ -1,7 +1,6 @@
 package com.example.myapplication
 
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -35,11 +34,12 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 MainAppScreen(
                     onNavigateToAR = { config ->
-                        Toast.makeText(
-                            this,
-                            "AR 진입: ${config.name} (${config.widthM}m x ${config.depthM}m x ${config.heightM}m)",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        val intent = RoomFitARActivity.createIntent(
+                            context = this,
+                            furnitureName = config.name,
+                            furnitureJson = config.toUnityJson()
+                        )
+                        startActivity(intent)
                     }
                 )
             }
