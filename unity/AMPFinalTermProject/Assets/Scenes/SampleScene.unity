@@ -308,10 +308,14 @@ MonoBehaviour:
   planeManager: {fileID: 8175466}
   targetDetectionMode: 3
   attachColliderToVerticalWalls: 1
-  showVerticalWallVisuals: 0
+  showVerticalWallVisuals: 1
   hideCeilingPlanes: 1
   floorPlaneFillColor: {r: 0.2, g: 0.78, b: 0.95, a: 0.08}
   floorPlaneBorderColor: {r: 0.2, g: 0.85, b: 1, a: 0.35}
+  wallPlaneFillColor: {r: 1, g: 0.55, b: 0.2, a: 0.08}
+  wallPlaneBorderColor: {r: 1, g: 0.6, b: 0.2, a: 0.45}
+  wallColliderFrontMargin: 0.01
+  wallColliderBackDepth: 0.5
   elevatedPlaneHideThreshold: 0.14
   minDepthBelowCamera: 0.15
 --- !u!114 &8175471
@@ -329,6 +333,7 @@ MonoBehaviour:
   planeDetectionController: {fileID: 0}
   placementReticle: {fileID: 0}
   placementManipulator: {fileID: 0}
+  bridgeManager: {fileID: 0}
   fineStepMeters: 0.02
 --- !u!114 &8175472
 MonoBehaviour:

@@ -656,13 +656,31 @@ namespace RoomFitAR.AR
             return root;
         }
 
+        private bool hasLastAppliedFloorY;
+        private float lastAppliedFloorY;
+        private int anchorBindGeneration;
+
         private void OnCalibratedFloorYChanged(float newFloorY)
         {
+            if (!hasLastAppliedFloorY)
+            {
+                hasLastAppliedFloorY = true;
+                lastAppliedFloorY = newFloorY;
+                return;
+            }
+
+            float deltaY = newFloorY - lastAppliedFloorY;
+            lastAppliedFloorY = newFloorY;
+            if (Mathf.Abs(deltaY) < 0.0001f)
+            {
+                return;
+            }
+
             if (PlacedFurnitureInstance != null)
             {
                 DetachFromAnchorPreservingWorldTransform();
                 Vector3 pos = PlacedFurnitureInstance.transform.position;
-                pos.y = newFloorY;
+                pos.y += deltaY;
                 PlacedFurnitureInstance.transform.position = pos;
                 targetDragPosition = pos;
                 BindToARAnchor(lastHitFloorPlane ?? planeDetectionController?.LowestFloorPlane);
@@ -681,7 +699,7 @@ namespace RoomFitAR.AR
                     continue;
                 }
 
-                RebindCommittedEntryAtFloorY(entry, newFloorY);
+                RebindCommittedEntryAtFloorY(entry, entry.instance.transform.position.y + deltaY);
             }
         }
 
@@ -747,6 +765,8 @@ namespace RoomFitAR.AR
 
         private void OnFloorCalibrationCleared()
         {
+            hasLastAppliedFloorY = false;
+            lastAppliedFloorY = 0f;
             ResetPlacedFurniture();
         }
 
@@ -894,6 +914,7 @@ namespace RoomFitAR.AR
             }
 
             DetachFromAnchorPreservingWorldTransform();
+            int myGeneration = ++anchorBindGeneration;
 
             // 에디터 Play 모드 등 실제 ARAnchor 서브시스템이 실행 중이지 않을 때는 월드 위치만 유지하고 종료
             if (anchorManager == null || !anchorManager.enabled ||
@@ -902,39 +923,56 @@ namespace RoomFitAR.AR
                 return;
             }
 
+            GameObject targetInstance = PlacedFurnitureInstance;
             Pose currentPose = new Pose(
-                PlacedFurnitureInstance.transform.position,
-                PlacedFurnitureInstance.transform.rotation);
+                targetInstance.transform.position,
+                targetInstance.transform.rotation);
 
+            ARAnchor createdAnchor = null;
             if (plane != null && plane.subsumedBy == null)
             {
                 try
                 {
-                    CurrentBoundAnchor = anchorManager.AttachAnchor(plane, currentPose);
+                    createdAnchor = anchorManager.AttachAnchor(plane, currentPose);
                 }
                 catch (Exception)
                 {
-                    CurrentBoundAnchor = null;
+                    createdAnchor = null;
                 }
             }
 
-            if (CurrentBoundAnchor == null)
+            if (createdAnchor == null)
             {
                 var result = await anchorManager.TryAddAnchorAsync(currentPose);
                 if (result.status.IsSuccess())
                 {
-                    CurrentBoundAnchor = result.value;
+                    createdAnchor = result.value;
                 }
             }
 
-            if (CurrentBoundAnchor != null && PlacedFurnitureInstance != null)
+            // 비동기 대기 중 새 드래그/취소/재바인딩이 발생했다면 늦게 생성된 앵커는 즉시 폐기
+            if (myGeneration != anchorBindGeneration ||
+                isDraggingSingleFinger ||
+                targetInstance == null ||
+                targetInstance != PlacedFurnitureInstance)
             {
-                PlacedFurnitureInstance.transform.SetParent(CurrentBoundAnchor.transform, true);
+                if (createdAnchor != null)
+                {
+                    Destroy(createdAnchor.gameObject);
+                }
+                return;
+            }
+
+            if (createdAnchor != null)
+            {
+                CurrentBoundAnchor = createdAnchor;
+                targetInstance.transform.SetParent(createdAnchor.transform, true);
             }
         }
 
         private void DetachFromAnchorPreservingWorldTransform()
         {
+            anchorBindGeneration++;
             if (PlacedFurnitureInstance != null && PlacedFurnitureInstance.transform.parent != null)
             {
                 PlacedFurnitureInstance.transform.SetParent(null, true);

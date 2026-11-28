@@ -36,6 +36,7 @@
 
         <activity
             android:name=".RoomFitARActivity"
+            android:process=":unity"
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale|layoutDirection|density"
             android:exported="false"
             android:hardwareAccelerated="false"

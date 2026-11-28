@@ -30,8 +30,8 @@ namespace RoomFitAR.AR
 
         [Header("Plane Visualization")]
         [SerializeField]
-        [Tooltip("수직 벽면(Vertical) 시각적 메쉬 표시 여부 (비활성화해도 충돌용 MeshCollider는 유지됨)")]
-        private bool showVerticalWallVisuals = false;
+        [Tooltip("수직 벽면(Vertical) 시각적 메쉬 표시 여부 (비활성화해도 충돌용 BoxCollider는 유지됨)")]
+        private bool showVerticalWallVisuals = true;
 
         [SerializeField]
         [Tooltip("천장(HorizontalDown) 평면 숨김 여부")]
@@ -45,6 +45,23 @@ namespace RoomFitAR.AR
         [Tooltip("바닥(HorizontalUp) 평면의 외곽선 색상")]
         private Color floorPlaneBorderColor = new Color(0.20f, 0.85f, 1.0f, 0.35f);
 
+        [SerializeField]
+        [Tooltip("수직 벽면(Vertical) 평면의 반투명 채우기 색상")]
+        private Color wallPlaneFillColor = new Color(1.0f, 0.55f, 0.20f, 0.08f);
+
+        [SerializeField]
+        [Tooltip("수직 벽면(Vertical) 평면의 외곽선 색상")]
+        private Color wallPlaneBorderColor = new Color(1.0f, 0.60f, 0.20f, 0.45f);
+
+        [Header("Vertical Wall Collider (SFR-005)")]
+        [SerializeField]
+        [Tooltip("벽면 앞쪽(실내 방향) 콜라이더 여유 두께(m)")]
+        private float wallColliderFrontMargin = 0.01f;
+
+        [SerializeField]
+        [Tooltip("벽면 뒤쪽(벽 너머)으로 확장할 충돌 볼륨 깊이(m) — 가구를 벽 너머로 밀어도 충돌 상태 유지")]
+        private float wallColliderBackDepth = 0.50f;
+
         [Header("Floor Height Filtering")]
         [SerializeField]
         [Tooltip("가장 낮은 유효 바닥 평면 대비 이 높이(m) 이상 떠 있는 수평 평면은 바닥 후보 및 시각화에서 제외")]
@@ -55,6 +72,7 @@ namespace RoomFitAR.AR
         private float minDepthBelowCamera = 0.15f;
 
         private Material runtimeFloorPlaneMaterial;
+        private Material runtimeWallPlaneMaterial;
 
         private readonly List<ARPlane> horizontalFloorPlanes = new();
         private readonly List<ARPlane> verticalWallPlanes = new();
@@ -68,6 +86,7 @@ namespace RoomFitAR.AR
         public bool HasDetectedWall => verticalWallPlanes.Count > 0;
         public bool IsFloorCalibrated { get; private set; }
         public float CalibratedFloorY { get; private set; }
+        public float FloorHeightOffsetY { get; private set; }
         public bool HasFloorReference => IsFloorCalibrated || hasAutoFloorReference;
         public float CurrentFloorReferenceY => IsFloorCalibrated ? CalibratedFloorY : autoFloorReferenceY;
         public ARPlane LowestFloorPlane { get; private set; }
@@ -146,6 +165,7 @@ namespace RoomFitAR.AR
         {
             IsFloorCalibrated = true;
             CalibratedFloorY = floorY;
+            FloorHeightOffsetY = 0f;
             if (sourcePlane != null)
             {
                 LowestFloorPlane = sourcePlane;
@@ -169,8 +189,10 @@ namespace RoomFitAR.AR
 
                 IsFloorCalibrated = true;
                 CalibratedFloorY = autoFloorReferenceY;
+                FloorHeightOffsetY = 0f;
             }
 
+            FloorHeightOffsetY += deltaMeters;
             CalibratedFloorY += deltaMeters;
             RefreshHorizontalFloorVisibility();
             CalibratedFloorYChanged?.Invoke(CalibratedFloorY);
@@ -183,6 +205,7 @@ namespace RoomFitAR.AR
         {
             IsFloorCalibrated = false;
             CalibratedFloorY = 0f;
+            FloorHeightOffsetY = 0f;
             UpdateFloorReference();
             RefreshHorizontalFloorVisibility();
             FloorCalibrationCleared?.Invoke();
@@ -270,6 +293,7 @@ namespace RoomFitAR.AR
             {
                 horizontalFloorPlanes.Remove(plane);
                 verticalWallPlanes.Remove(plane);
+                DisableWallColliders(plane);
                 return;
             }
 
@@ -300,26 +324,76 @@ namespace RoomFitAR.AR
 
                 if (attachColliderToVerticalWalls)
                 {
-                    EnsurePlaneMeshCollider(plane);
+                    EnsureVerticalWallCollider(plane);
                 }
             }
         }
 
-        private static void EnsurePlaneMeshCollider(ARPlane plane)
+        private void EnsureVerticalWallCollider(ARPlane plane)
         {
+            // 1) 기존 MeshFilter 메시가 준비된 경우 MeshCollider도 동기화
             MeshFilter meshFilter = plane.GetComponent<MeshFilter>();
-            if (meshFilter == null || meshFilter.sharedMesh == null)
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                MeshCollider meshCollider = plane.GetComponent<MeshCollider>();
+                if (meshCollider == null)
+                {
+                    meshCollider = plane.gameObject.AddComponent<MeshCollider>();
+                }
+
+                meshCollider.sharedMesh = meshFilter.sharedMesh;
+                meshCollider.enabled = true;
+            }
+
+            // 2) ARPlaneMeshVisualizer 활성 여부나 0두께 평면 통과와 무관하게 항상 동작하는 두께 있는 BoxCollider 동기화
+            BoxCollider boxCollider = plane.GetComponent<BoxCollider>();
+            if (boxCollider == null)
+            {
+                boxCollider = plane.gameObject.AddComponent<BoxCollider>();
+            }
+
+            float sizeX = Mathf.Max(plane.size.x, 0.10f);
+            float sizeZ = Mathf.Max(plane.size.y, 0.10f);
+            float front = Mathf.Max(0.005f, wallColliderFrontMargin);
+            float back = Mathf.Max(0.05f, wallColliderBackDepth);
+
+            // ARPlane 로컬 +Y는 평면 법선. 카메라 쪽을 실내(+normalSign)로 판별하여 벽 뒤쪽(-normalSign)으로 충돌 볼륨 확장
+            float normalSign = 1f;
+            Camera cam = Camera.main;
+            if (cam != null)
+            {
+                float dot = Vector3.Dot(plane.transform.up, cam.transform.position - plane.center);
+                normalSign = dot >= 0f ? 1f : -1f;
+            }
+
+            float centerY = normalSign * (front - back) * 0.5f;
+            float sizeY = front + back;
+
+            Vector2 centerInPlane = plane.centerInPlaneSpace;
+            boxCollider.center = new Vector3(centerInPlane.x, centerY, centerInPlane.y);
+            boxCollider.size = new Vector3(sizeX, sizeY, sizeZ);
+            boxCollider.isTrigger = true;
+            boxCollider.enabled = true;
+        }
+
+        private static void DisableWallColliders(ARPlane plane)
+        {
+            if (plane == null)
             {
                 return;
             }
 
-            MeshCollider meshCollider = plane.GetComponent<MeshCollider>();
-            if (meshCollider == null)
+            BoxCollider boxCollider = plane.GetComponent<BoxCollider>();
+            if (boxCollider != null)
             {
-                meshCollider = plane.gameObject.AddComponent<MeshCollider>();
+                boxCollider.enabled = false;
             }
 
-            meshCollider.sharedMesh = meshFilter.sharedMesh;
+            MeshCollider meshCollider = plane.GetComponent<MeshCollider>();
+            if (meshCollider != null)
+            {
+                meshCollider.enabled = false;
+            }
         }
 
         private void UpdateFloorReference()
@@ -327,7 +401,6 @@ namespace RoomFitAR.AR
             bool previousHasRef = HasFloorReference;
             float previousRefY = CurrentFloorReferenceY;
 
-            float minValidY = float.MaxValue;
             Camera cam = Camera.main;
 
             for (int i = horizontalFloorPlanes.Count - 1; i >= 0; i--)
@@ -336,49 +409,62 @@ namespace RoomFitAR.AR
                 if (plane == null || plane.subsumedBy != null || plane.trackingState == TrackingState.None)
                 {
                     horizontalFloorPlanes.RemoveAt(i);
-                    continue;
                 }
+            }
 
+            ARPlane bestReferencePlane = null;
+            float bestScore = -1f;
+            const float clusterBandTolerance = 0.08f;
+
+            for (int i = 0; i < horizontalFloorPlanes.Count; i++)
+            {
+                ARPlane plane = horizontalFloorPlanes[i];
                 float planeY = plane.center.y;
                 if (cam != null && planeY >= cam.transform.position.y - minDepthBelowCamera)
                 {
                     continue;
                 }
 
-                if (planeY < minValidY)
+                if (IsFloorCalibrated)
                 {
-                    minValidY = planeY;
-                }
-            }
-
-            ARPlane bestReferencePlane = null;
-            float bestArea = -1f;
-
-            if (minValidY < float.MaxValue)
-            {
-                const float floorBandTolerance = 0.05f;
-                for (int i = 0; i < horizontalFloorPlanes.Count; i++)
-                {
-                    ARPlane plane = horizontalFloorPlanes[i];
-                    float planeY = plane.center.y;
-                    if (cam != null && planeY >= cam.transform.position.y - minDepthBelowCamera)
+                    // 수동 확정 상태에서는 확정 높이 ±elevatedPlaneHideThreshold 안의 가장 넓은 바닥 평면을 앵커 참조용으로 유지
+                    if (Mathf.Abs(planeY - CalibratedFloorY) > elevatedPlaneHideThreshold)
                     {
                         continue;
                     }
 
-                    // 수동 확정 상태에서는 확정 높이 ±elevatedPlaneHideThreshold 안의 가장 넓은 바닥 평면을 앵커 참조용으로 유지
-                    bool inBand = IsFloorCalibrated
-                        ? Mathf.Abs(planeY - CalibratedFloorY) <= elevatedPlaneHideThreshold
-                        : planeY <= minValidY + floorBandTolerance;
-
-                    if (inBand)
+                    float area = plane.size.x * plane.size.y;
+                    if (bestReferencePlane == null || area > bestScore)
                     {
-                        float area = plane.size.x * plane.size.y;
-                        if (bestReferencePlane == null || area > bestArea)
+                        bestReferencePlane = plane;
+                        bestScore = area;
+                    }
+                }
+                else
+                {
+                    // 확정 전에는 작은 지하 노이즈 평면에 끌려 내려가지 않도록,
+                    // 비슷한 높이대(±8cm)의 누적 면적이 가장 넓은 주력 바닥 평면을 우선 선택
+                    float clusterArea = 0f;
+                    for (int j = 0; j < horizontalFloorPlanes.Count; j++)
+                    {
+                        ARPlane other = horizontalFloorPlanes[j];
+                        if (cam != null && other.center.y >= cam.transform.position.y - minDepthBelowCamera)
                         {
-                            bestReferencePlane = plane;
-                            bestArea = area;
+                            continue;
                         }
+
+                        if (Mathf.Abs(other.center.y - planeY) <= clusterBandTolerance)
+                        {
+                            clusterArea += other.size.x * other.size.y;
+                        }
+                    }
+
+                    float ownArea = plane.size.x * plane.size.y;
+                    float score = clusterArea + ownArea * 0.25f;
+                    if (bestReferencePlane == null || score > bestScore)
+                    {
+                        bestReferencePlane = plane;
+                        bestScore = score;
                     }
                 }
             }
@@ -434,7 +520,9 @@ namespace RoomFitAR.AR
                 return false;
             }
 
-            if (HasFloorReference && plane.center.y > CurrentFloorReferenceY + elevatedPlaneHideThreshold)
+            // 바닥 높이 확정(2단계) 이후에만 확정 높이에서 크게 벗어난 오차 평면을 숨기고,
+            // 확정 전(1단계)에는 감지된 바닥 평면을 모두 표시해 넓은 바닥이 잘리지 않도록 한다.
+            if (IsFloorCalibrated && Mathf.Abs(plane.center.y - CalibratedFloorY) > elevatedPlaneHideThreshold)
             {
                 return false;
             }
@@ -444,16 +532,33 @@ namespace RoomFitAR.AR
 
         private void ApplyPlaneStyle(ARPlane plane)
         {
-            if (plane == null || plane.alignment != PlaneAlignment.HorizontalUp)
+            if (plane == null)
             {
                 return;
             }
 
-            Material floorMat = GetOrCreateFloorPlaneMaterial();
-            MeshRenderer meshRenderer = plane.GetComponent<MeshRenderer>();
-            if (meshRenderer != null && floorMat != null)
+            Material targetMat;
+            Color borderColor;
+
+            if (plane.alignment == PlaneAlignment.HorizontalUp)
             {
-                meshRenderer.sharedMaterial = floorMat;
+                targetMat = GetOrCreateFloorPlaneMaterial();
+                borderColor = floorPlaneBorderColor;
+            }
+            else if (plane.alignment == PlaneAlignment.Vertical)
+            {
+                targetMat = GetOrCreateWallPlaneMaterial();
+                borderColor = wallPlaneBorderColor;
+            }
+            else
+            {
+                return;
+            }
+
+            MeshRenderer meshRenderer = plane.GetComponent<MeshRenderer>();
+            if (meshRenderer != null && targetMat != null)
+            {
+                meshRenderer.sharedMaterial = targetMat;
             }
 
             LineRenderer lineRenderer = plane.GetComponent<LineRenderer>();
@@ -461,8 +566,8 @@ namespace RoomFitAR.AR
             {
                 lineRenderer.startWidth = 0.004f;
                 lineRenderer.endWidth = 0.004f;
-                lineRenderer.startColor = floorPlaneBorderColor;
-                lineRenderer.endColor = floorPlaneBorderColor;
+                lineRenderer.startColor = borderColor;
+                lineRenderer.endColor = borderColor;
             }
         }
 
@@ -473,6 +578,23 @@ namespace RoomFitAR.AR
                 return runtimeFloorPlaneMaterial;
             }
 
+            runtimeFloorPlaneMaterial = CreateSubtlePlaneMaterial("RoomFit_FloorPlane_Subtle", floorPlaneFillColor);
+            return runtimeFloorPlaneMaterial;
+        }
+
+        private Material GetOrCreateWallPlaneMaterial()
+        {
+            if (runtimeWallPlaneMaterial != null)
+            {
+                return runtimeWallPlaneMaterial;
+            }
+
+            runtimeWallPlaneMaterial = CreateSubtlePlaneMaterial("RoomFit_WallPlane_Subtle", wallPlaneFillColor);
+            return runtimeWallPlaneMaterial;
+        }
+
+        private static Material CreateSubtlePlaneMaterial(string materialName, Color fillColor)
+        {
             Shader shader = Shader.Find("Sprites/Default");
             if (shader == null)
             {
@@ -484,10 +606,10 @@ namespace RoomFitAR.AR
                 return null;
             }
 
-            runtimeFloorPlaneMaterial = new Material(shader);
-            runtimeFloorPlaneMaterial.name = "RoomFit_FloorPlane_Subtle";
-            runtimeFloorPlaneMaterial.color = floorPlaneFillColor;
-            return runtimeFloorPlaneMaterial;
+            Material mat = new Material(shader);
+            mat.name = materialName;
+            mat.color = fillColor;
+            return mat;
         }
 
         private static void ApplyPlaneVisibility(ARPlane plane, bool visible)

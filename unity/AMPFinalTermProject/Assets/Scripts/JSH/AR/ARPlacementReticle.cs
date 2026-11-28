@@ -129,78 +129,56 @@ namespace RoomFitAR.AR
             if (raycastManager != null &&
                 raycastManager.Raycast(screenPoint, raycastHits, TrackableType.PlaneWithinPolygon))
             {
-                float lowestValidY = float.MaxValue;
-
                 bool isCalibrated = planeDetectionController != null && planeDetectionController.IsFloorCalibrated;
-                bool hasRefFloor = planeDetectionController != null && planeDetectionController.HasFloorReference;
-                float maxAllowedY = hasRefFloor
-                    ? planeDetectionController.CurrentFloorReferenceY + planeDetectionController.ElevatedPlaneHideThreshold
-                    : float.MaxValue;
+                float calibratedY = planeDetectionController != null ? planeDetectionController.CalibratedFloorY : 0f;
+                float heightOffsetY = planeDetectionController != null ? planeDetectionController.FloorHeightOffsetY : 0f;
+                float bandThreshold = planeDetectionController != null
+                    ? Mathf.Max(0.35f, planeDetectionController.ElevatedPlaneHideThreshold)
+                    : 0.35f;
                 float minDepthBelowCam = planeDetectionController != null
                     ? planeDetectionController.MinDepthBelowCamera
                     : 0.15f;
+
+                bool foundBestHit = false;
+                ARRaycastHit bestFloorHit = default;
+                ARPlane bestFloorPlane = null;
+                float bestArea = -1f;
 
                 for (int i = 0; i < raycastHits.Count; i++)
                 {
                     ARRaycastHit hit = raycastHits[i];
                     ARPlane plane = ResolvePlane(hit);
 
-                    if (!IsValidFloorHit(hit, plane, hasRefFloor, maxAllowedY, minDepthBelowCam))
+                    if (!IsValidFloorHit(hit, plane, isCalibrated, calibratedY, bandThreshold, minDepthBelowCam))
                     {
                         continue;
                     }
 
-                    if (hit.pose.position.y < lowestValidY)
+                    // 작은 지하 오차 조각 대신, 광선이 맞은 유효 바닥 평면 중 가장 넓은 평면을 우선 선택
+                    float area = plane.size.x * plane.size.y;
+                    if (!foundBestHit || area > bestArea)
                     {
-                        lowestValidY = hit.pose.position.y;
+                        foundBestHit = true;
+                        bestFloorHit = hit;
+                        bestFloorPlane = plane;
+                        bestArea = area;
                     }
                 }
 
-                if (lowestValidY < float.MaxValue)
+                if (foundBestHit)
                 {
-                    const float floorBandTolerance = 0.05f;
-                    bool foundBestHit = false;
-                    ARRaycastHit bestFloorHit = default;
-                    ARPlane bestFloorPlane = null;
-                    float bestArea = -1f;
-
-                    for (int i = 0; i < raycastHits.Count; i++)
+                    // 다른 공간으로 이동해도 실제 그 자리의 AR 바닥 평면 높이에 밀착하도록
+                    // 상수 CalibratedFloorY로 강제 덮어쓰지 않고 실제 히트 높이 + 사용자 미세 오프셋 적용
+                    Vector3 hitPos = bestFloorHit.pose.position;
+                    if (isCalibrated)
                     {
-                        ARRaycastHit hit = raycastHits[i];
-                        ARPlane plane = ResolvePlane(hit);
-
-                        if (!IsValidFloorHit(hit, plane, hasRefFloor, maxAllowedY, minDepthBelowCam))
-                        {
-                            continue;
-                        }
-
-                        // 최하단 바닥대(5cm 이내) 중 가장 넓은 안정 평면을 우선 선택
-                        if (hit.pose.position.y <= lowestValidY + floorBandTolerance)
-                        {
-                            float area = plane.size.x * plane.size.y;
-                            if (!foundBestHit || area > bestArea)
-                            {
-                                foundBestHit = true;
-                                bestFloorHit = hit;
-                                bestFloorPlane = plane;
-                                bestArea = area;
-                            }
-                        }
+                        hitPos.y += heightOffsetY;
                     }
 
-                    if (foundBestHit)
-                    {
-                        Vector3 hitPos = bestFloorHit.pose.position;
-                        if (isCalibrated)
-                        {
-                            hitPos.y = planeDetectionController.CalibratedFloorY;
-                        }
-
-                        Vector3 forward = CalculateCameraHorizontalForward();
-                        hitPose = new Pose(hitPos, Quaternion.LookRotation(forward, Vector3.up));
-                        hitPlane = bestFloorPlane;
-                        return true;
-                    }
+                    Vector3 forward = CalculateCameraHorizontalForward();
+                    hitPose = new Pose(hitPos, Quaternion.LookRotation(forward, Vector3.up));
+                    hitPlane = bestFloorPlane;
+                    return true;
                 }
             }
 
@@ -298,8 +276,9 @@ namespace RoomFitAR.AR
         private bool IsValidFloorHit(
             ARRaycastHit hit,
             ARPlane plane,
-            bool hasRefFloor,
-            float maxAllowedY,
+            bool isCalibrated,
+            float calibratedY,
+            float bandThreshold,
             float minDepthBelowCam)
         {
             if (plane == null ||
@@ -315,7 +294,7 @@ namespace RoomFitAR.AR
                 return false;
             }
 
-            if (hasRefFloor && hit.pose.position.y > maxAllowedY)
+            if (isCalibrated && Mathf.Abs(hit.pose.position.y - calibratedY) > bandThreshold)
             {
                 return false;
             }
